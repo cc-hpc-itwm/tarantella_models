@@ -197,7 +197,7 @@ class TransformerTntTask(object):
     if not self.predict_model:
       self.predict_model = create_model(self.internal_model, self.params, False)
     self.predict_model.summary()
-    return transormer_main.evaluate_and_log_bleu(
+    return transformer_main.evaluate_and_log_bleu(
         self.predict_model, self.params, self.flags_obj.bleu_source,
         self.flags_obj.bleu_ref, self.flags_obj.vocab_file)
 
