@@ -103,34 +103,35 @@ class TransformerTntTask(object):
 
     # Add flag-defined parameters to params object
     num_gpus = flags_core.get_num_gpus(flags_obj)
-    self.params = params = misc.get_model_params(flags_obj.param_set, num_gpus)
+    self.params = misc.get_model_params(flags_obj.param_set, num_gpus)
 
-    params["nepochs"] = flags_obj.train_epochs
-    params["num_gpus"] = num_gpus
-    params["data_dir"] = flags_obj.data_dir
-    params["max_length"] = flags_obj.max_length
-    params["decode_batch_size"] = flags_obj.decode_batch_size
-    params["decode_max_length"] = flags_obj.decode_max_length
-    params["padded_decode"] = flags_obj.padded_decode
-    params["max_io_parallelism"] = (
+    self.params["train_epochs"] = flags_obj.train_epochs
+    self.params["batch_size"] = flags_obj.batch_size or self.params["default_batch_size"]
+
+    if flags_obj.vocab_size:
+      self.params["vocab_size"] = flags_obj.vocab_size
+
+    self.params["data_dir"] = flags_obj.data_dir
+    self.params["max_length"] = flags_obj.max_length
+    self.params["decode_batch_size"] = flags_obj.decode_batch_size
+    self.params["decode_max_length"] = flags_obj.decode_max_length
+    self.params["padded_decode"] = flags_obj.padded_decode
+    self.params["max_io_parallelism"] = (
         flags_obj.num_parallel_calls or tf.data.experimental.AUTOTUNE)
+    self.params["repeat_dataset"] = None
 
-    params["use_synthetic_data"] = flags_obj.use_synthetic_data
-    params["batch_size"] = flags_obj.batch_size or params["default_batch_size"]
-    params["repeat_dataset"] = None
-    params["dtype"] = flags_core.get_tf_dtype(flags_obj)
-    params["enable_tensorboard"] = flags_obj.enable_tensorboard
-    params["enable_metrics_in_training"] = flags_obj.enable_metrics_in_training
-    params["steps_between_evals"] = flags_obj.steps_between_evals
-    params["save_weights_only"] = flags_obj.save_weights_only
+    self.params["use_synthetic_data"] = flags_obj.use_synthetic_data
+    self.params["dtype"] = flags_core.get_tf_dtype(flags_obj)
+    self.params["enable_tensorboard"] = flags_obj.enable_tensorboard
+    self.params["enable_metrics_in_training"] = flags_obj.enable_metrics_in_training
+    self.params["steps_between_evals"] = flags_obj.steps_between_evals
+    self.params["save_weights_only"] = flags_obj.save_weights_only
 
-    logging.info("Running transformer with num_gpus = %d", num_gpus)
-    self.internal_model = transformer.Transformer(params, name="transformer_v2")
-
+    self.internal_model = transformer.Transformer(self.params, name="transformer_v2")
     self.have_datapar = False
     if not flags_obj.without_datapar:
-      tarantella.init(params["num_gpus"])
-    self.have_datapar = True
+      tarantella.init()
+      self.have_datapar = True
 
     self.rank = 0
     self.comm_size = 1
@@ -141,7 +142,6 @@ class TransformerTntTask(object):
 
   def train(self):
     """Trains the model."""
-    params = self.params
     flags_obj = self.flags_obj
     
     model = create_model(self.internal_model, self.params, is_train=True)
@@ -152,7 +152,7 @@ class TransformerTntTask(object):
     model.compile(opt)
     model.summary()
 
-    train_ds = data_pipeline.train_input_fn(params, self.comm_size, self.rank)
+    train_ds = data_pipeline.train_input_fn(self.params, self.comm_size, self.rank)
     map_data_fn = data_pipeline.map_data_for_transformer_fn
     train_ds = train_ds.map(
         map_data_fn, num_parallel_calls=tf.data.experimental.AUTOTUNE)
@@ -161,45 +161,29 @@ class TransformerTntTask(object):
     if self.rank == 0:
       callbacks = misc.get_callbacks()
 
-    cased_score, uncased_score = None, None
-    cased_score_history, uncased_score_history = [], []
-
     logging.info("Start train")
     history = model.fit(train_ds,
-                        epochs=self.params["nepochs"],
+                        epochs=self.params["train_epochs"],
                         callbacks=callbacks,
-                        verbose=(1 if self.rank == 0 else 0)
+                        verbose=(2 if self.rank == 0 else 0)
                         )
     logging.info("Train history: {}".format(history.history))
 
-    logging.info("Start evaluation")
-    if self.rank == 0:
-      if (flags_obj.bleu_source and flags_obj.bleu_ref):
-        uncased_score, cased_score = self.eval()
-        cased_score_history.append([current_iteration + 1, cased_score])
-        uncased_score_history.append([current_iteration + 1, uncased_score])
-
-    stats = ({
-              "loss": train_loss
-              } if history is None else {})
-
-    if self.rank == 0:
-      misc.update_stats(history, stats, callbacks)
-      if uncased_score and cased_score:
-        stats["bleu_uncased"] = uncased_score
-        stats["bleu_cased"] = cased_score
-        stats["bleu_uncased_history"] = uncased_score_history
-        stats["bleu_cased_history"] = cased_score_history
-    return stats
+    stats = {}
+    misc.update_stats(history, stats, callbacks)
+  return stats
 
   def eval(self):
     """Evaluates the model."""
-    if not self.predict_model:
-      self.predict_model = create_model(self.internal_model, self.params, False)
-    self.predict_model.summary()
-    return transformer_main.evaluate_and_log_bleu(
-        self.predict_model, self.params, self.flags_obj.bleu_source,
-        self.flags_obj.bleu_ref, self.flags_obj.vocab_file)
+    if self.rank == 0:
+      logging.info("Start evaluation")
+    
+      if not self.predict_model:
+        self.predict_model = create_model(self.internal_model, self.params, False)
+      self.predict_model.summary()
+      return transformer_main.evaluate_and_log_bleu(
+          self.predict_model, self.params, self.flags_obj.bleu_source,
+          self.flags_obj.bleu_ref, self.flags_obj.vocab_file)
 
 
   def _create_optimizer(self):
@@ -230,15 +214,8 @@ def main(_):
         num_gpus=flags_obj.num_gpus,
         datasets_num_private_threads=flags_obj.datasets_num_private_threads)
 
-  if flags_obj.mode == "train":
-    task.train()
-  elif flags_obj.mode == "predict":
-    task.predict()
-  elif flags_obj.mode == "eval":
-    task.eval()
-  else:
-    raise ValueError("Invalid mode {}".format(flags_obj.mode))
-
+  task.train()
+  task.eval()
 
 if __name__ == "__main__":
   logging.set_verbosity(logging.INFO)

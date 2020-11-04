@@ -50,3 +50,9 @@ def define_transformer_flags():
     default=False,
     help=flags_core.help_wrap(
         'Disable Tarantella'))
+  flags.DEFINE_integer(
+    name='vocab_size',
+    default=33786,
+    help=flags_core.help_wrap(
+        'Number of tokens generated when running `transformer/data_download.py`'))
+
