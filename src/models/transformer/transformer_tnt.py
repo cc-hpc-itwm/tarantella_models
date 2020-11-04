@@ -108,10 +108,8 @@ class TransformerTntTask(object):
     self.params["train_epochs"] = flags_obj.train_epochs
     self.params["batch_size"] = flags_obj.batch_size or self.params["default_batch_size"]
 
-    if flags_obj.vocab_size:
-      self.params["vocab_size"] = flags_obj.vocab_size
-
     self.params["data_dir"] = flags_obj.data_dir
+    self.params["vocab_size"] = flags_obj.vocab_size or self.params["vocab_size"]
     self.params["max_length"] = flags_obj.max_length
     self.params["decode_batch_size"] = flags_obj.decode_batch_size
     self.params["decode_max_length"] = flags_obj.decode_max_length
@@ -204,7 +202,6 @@ class TransformerTntTask(object):
 
 def main(_):
   flags_obj = flags.FLAGS
-  task = TransformerTntTask(flags_obj)
 
   # Execute flag override logic for better model performance
   if flags_obj.tf_gpu_thread_mode:
@@ -214,6 +211,7 @@ def main(_):
         num_gpus=flags_obj.num_gpus,
         datasets_num_private_threads=flags_obj.datasets_num_private_threads)
 
+  task = TransformerTntTask(flags_obj)
   task.train()
   task.eval()
 
