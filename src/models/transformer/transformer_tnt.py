@@ -171,7 +171,7 @@ class TransformerTntTask(object):
 
     stats = {}
     misc.update_stats(history, stats, callbacks)
-  return stats
+    return stats
 
   def eval(self):
     """Evaluates the model."""
