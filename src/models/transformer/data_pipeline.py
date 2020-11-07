@@ -137,7 +137,7 @@ def _read_and_batch_from_files(file_pattern,
         # First calculate batch size (token number) per worker, then divide it
         # into sentences, and finally expand to a global batch. It could prove
         # the global batch divisble for distribution strategy.
-        int(batch_size // comm_size // max_length * comm_size),
+        int(batch_size // comm_size // max_length * comm_size)//comm_size,
         ([max_length], [max_length]),
         drop_remainder=True)
   dataset = dataset.shard(comm_size, rank)
