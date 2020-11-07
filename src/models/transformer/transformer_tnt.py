@@ -148,7 +148,8 @@ class TransformerTntTask(object):
     
     opt = self._create_optimizer()
     model.compile(opt)
-    model.summary()
+    if self.rank == 0:
+      model.summary()
 
     train_ds = data_pipeline.train_input_fn(self.params, self.comm_size, self.rank)
     map_data_fn = data_pipeline.map_data_for_transformer_fn
@@ -178,7 +179,6 @@ class TransformerTntTask(object):
     
       if not self.predict_model:
         self.predict_model = create_model(self.internal_model, self.params, False)
-      self.predict_model.summary()
       return transformer_main.evaluate_and_log_bleu(
           self.predict_model, self.params, self.flags_obj.bleu_source,
           self.flags_obj.bleu_ref, self.flags_obj.vocab_file)
