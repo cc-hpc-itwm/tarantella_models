@@ -137,11 +137,19 @@ def _read_and_batch_from_files(file_pattern,
         # First calculate batch size (token number) per worker, then divide it
         # into sentences, and finally expand to a global batch. It could prove
         # the global batch divisble for distribution strategy.
-        int(batch_size // comm_size // max_length * comm_size)//comm_size,
+        int(batch_size // comm_size // max_length * comm_size),
         ([max_length], [max_length]),
         drop_remainder=True)
+  dataset = dataset.unbatch()
+
   dataset = dataset.shard(comm_size, rank)
-  
+  dataset = dataset.padded_batch(
+        # First calculate batch size (token number) per worker, then divide it
+        # into sentences, and finally expand to a global batch. It could prove
+        # the global batch divisble for distribution strategy.
+        int(batch_size // comm_size // max_length),
+        ([max_length], [max_length]),
+        drop_remainder=True)
  
   # Prefetch the next element to improve speed of input pipeline.
   dataset = dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
