@@ -52,11 +52,6 @@ import misc as tnt_misc
 
 import tarantella
 
-INF = int(1e9)
-BLEU_DIR = "bleu"
-_SINGLE_SAMPLE = 1
-
-
 
 def create_model(internal_model, params, is_train):
   """Creates transformer model."""
