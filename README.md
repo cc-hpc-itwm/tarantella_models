@@ -1,3 +1,3 @@
-# Tarantella MLPerf Setup
+# Tarantella Models
 
-Respository for [MLPerf](http://www.mlperf.org) models and experimental evaluation scripts for [Tarantella](https://gitlab.itwm.fraunhofer.de/carpenamarie/hpdlf).
+Respository for [TensorFlow models](https://github.com/tensorflow/models) for [Tarantella](https://github.com/cc-hpc-itwm/tarantella).
