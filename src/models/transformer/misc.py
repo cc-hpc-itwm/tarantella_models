@@ -45,11 +45,6 @@ def define_transformer_flags():
     default=1,
     help=flags_core.help_wrap(
         'Number of training epochs'))
-  flags.DEFINE_boolean(
-    name='without_datapar',
-    default=False,
-    help=flags_core.help_wrap(
-        'Disable Tarantella'))
   flags.DEFINE_integer(
     name='vocab_size',
     default=33786,

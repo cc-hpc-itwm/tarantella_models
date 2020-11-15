@@ -21,12 +21,12 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import logging
 import os
 import tempfile
 # Import libraries
 from absl import app
 from absl import flags
-from absl import logging
 import tensorflow as tf
 
 import layer_helpers.einsum_dense 
@@ -50,9 +50,10 @@ from official.utils.misc import keras_utils
 import data_pipeline
 import misc as tnt_misc
 
-import tarantella
+import tarantella as tnt
 
-
+tnt.init()
+  
 def create_model(internal_model, params, is_train):
   """Creates transformer model."""
   with tf.name_scope("model"):
@@ -111,56 +112,35 @@ class TransformerTntTask(object):
     self.params["padded_decode"] = flags_obj.padded_decode
     self.params["max_io_parallelism"] = (
         flags_obj.num_parallel_calls or tf.data.experimental.AUTOTUNE)
-    self.params["repeat_dataset"] = None
 
     self.params["use_synthetic_data"] = flags_obj.use_synthetic_data
     self.params["dtype"] = flags_core.get_tf_dtype(flags_obj)
-    self.params["enable_tensorboard"] = flags_obj.enable_tensorboard
     self.params["enable_metrics_in_training"] = flags_obj.enable_metrics_in_training
-    self.params["steps_between_evals"] = flags_obj.steps_between_evals
-    self.params["save_weights_only"] = flags_obj.save_weights_only
 
     self.internal_model = transformer.Transformer(self.params, name="transformer_v2")
-    self.have_datapar = False
-    if not flags_obj.without_datapar:
-      tarantella.init()
-      self.have_datapar = True
-
-    self.rank = 0
-    self.comm_size = 1
-    if self.have_datapar:
-      self.rank = tarantella.get_rank()
-      self.comm_size = tarantella.get_size()
-
 
   def train(self):
     """Trains the model."""
     flags_obj = self.flags_obj
     
     model = create_model(self.internal_model, self.params, is_train=True)
-    if self.have_datapar:
-      model = tarantella.model.TarantellaModel(model)
+    model = tnt.Model(model)
     
     opt = self._create_optimizer()
     model.compile(opt)
-    if self.rank == 0:
-      model.summary()
+    model.summary()
 
-    train_ds = data_pipeline.train_input_fn(self.params, self.comm_size, self.rank)
-    map_data_fn = data_pipeline.map_data_for_transformer_fn
-    train_ds = train_ds.map(
-        map_data_fn, num_parallel_calls=tf.data.experimental.AUTOTUNE)
-    
+    train_ds = data_pipeline.train_input_fn(self.params)
+
     callbacks = []
-    if self.rank == 0:
-      callbacks = misc.get_callbacks()
+    if self.flags_obj.enable_tensorboard:
+      callbacks.append(tf.keras.callbacks.TensorBoard(log_dir=self.flags_obj.model_dir))
 
     logging.info("Start train")
     history = model.fit(train_ds,
                         epochs=self.params["train_epochs"],
                         callbacks=callbacks,
-                        verbose=(2 if self.rank == 0 else 0)
-                        )
+                        verbose=1)
     logging.info("Train history: {}".format(history.history))
 
     stats = {}
@@ -169,14 +149,13 @@ class TransformerTntTask(object):
 
   def eval(self):
     """Evaluates the model."""
-    if self.rank == 0:
-      logging.info("Start evaluation")
-    
-      if not self.predict_model:
-        self.predict_model = create_model(self.internal_model, self.params, False)
-      return transformer_main.evaluate_and_log_bleu(
-          self.predict_model, self.params, self.flags_obj.bleu_source,
-          self.flags_obj.bleu_ref, self.flags_obj.vocab_file)
+    logging.info("Start evaluation")
+  
+    if not self.predict_model:
+      self.predict_model = create_model(self.internal_model, self.params, False)
+    return transformer_main.evaluate_and_log_bleu(
+        self.predict_model, self.params, self.flags_obj.bleu_source,
+        self.flags_obj.bleu_ref, self.flags_obj.vocab_file)
 
 
   def _create_optimizer(self):
@@ -211,7 +190,6 @@ def main(_):
   task.eval()
 
 if __name__ == "__main__":
-  logging.set_verbosity(logging.INFO)
   tnt_misc.define_transformer_flags()
   app.run(main)
 

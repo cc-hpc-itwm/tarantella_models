@@ -78,43 +78,24 @@ def _read_and_batch_from_files(file_pattern,
                                max_length,
                                max_io_parallelism,
                                shuffle,
-                               repeat,
-                               shuffle_seed = 42,
-                               comm_size = 1, rank = 0):
+                               shuffle_seed = 42):
   """Create dataset where each item is a dict of "inputs" and "targets".
 
   Args:
     file_pattern: String used to match the input TFRecord files.
-    batch_size: Maximum number of tokens per global batch of examples.
+    batch_size: Number of tokens per global batch of examples.
+                The input is batched so that every batch has the shape
+                [batch_size // max_length, max_length].
     max_length: Maximum number of tokens per example
     max_io_parallelism: Max number of cpu cores for parallel input processing.
     shuffle: If true, randomizes order of elements.
-    repeat: Number of times to repeat the dataset. If None, the dataset is
-      repeated forever.
-    static_batch: Whether the batches in the dataset should have static shapes.
-      If True, the input is batched so that every batch has the shape
-      [batch_size // max_length, max_length]. If False, the input is grouped by
-      length, and batched so that batches may have different
-      shapes [N, M], where: N * M <= batch_size M <= max_length In general, this
-        setting should be False. Dynamic shapes allow the inputs to be grouped
-        so that the number of padding tokens is minimized, and helps model
-        training. In cases where the input shape must be static (e.g. running on
-        TPU), this setting should be set to True.
-    num_replicas: Number of GPUs or other workers. We will generate global
-      batches, and each global batch is equally divisible by number of replicas.
-      Currently it is only effective when static_batch==True. TODO: make it
-        effective when static_batch=False.
-    ctx: Input context.
+    shuffle_seed: Fixed seed to be used for shuffling.
 
   Returns:
     tf.data.Dataset object containing examples loaded from the files.
   """
   dataset = tf.data.Dataset.list_files(file_pattern, shuffle=shuffle, seed=shuffle_seed)
 
-  # if ctx and ctx.num_input_pipelines > 1:
-  #   logging.info("Shard %d of the dataset.", ctx.input_pipeline_id)
-  #   dataset = dataset.shard(ctx.num_input_pipelines, ctx.input_pipeline_id)
-  
   # Read files and interleave results. When training, the order of the examples
   # will be non-deterministic.
   options = tf.data.Options()
@@ -132,31 +113,20 @@ def _read_and_batch_from_files(file_pattern,
   # Remove examples where the input or target length exceeds the maximum length,
   dataset = dataset.filter(lambda x, y: data_pipeline._filter_max_length((x, y), max_length))
 
-  # Assume static batch
-  dataset = dataset.padded_batch(
-        # First calculate batch size (token number) per worker, then divide it
-        # into sentences, and finally expand to a global batch. It could prove
-        # the global batch divisble for distribution strategy.
-        int(batch_size // comm_size // max_length * comm_size),
-        ([max_length], [max_length]),
-        drop_remainder=True)
-  dataset = dataset.unbatch()
-
-  dataset = dataset.shard(comm_size, rank)
-  dataset = dataset.padded_batch(
-        # First calculate batch size (token number) per worker, then divide it
-        # into sentences, and finally expand to a global batch. It could prove
-        # the global batch divisble for distribution strategy.
-        int(batch_size // comm_size // max_length),
-        ([max_length], [max_length]),
-        drop_remainder=True)
+  # Use the number of sentences as the actual batch size, instead of the 
+  # `number of tokens` provided by the user
+  dataset = dataset.padded_batch(int(batch_size // max_length),
+                                 ([max_length], [max_length]),
+                                 drop_remainder=True)
  
   # Prefetch the next element to improve speed of input pipeline.
   dataset = dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
+  dataset = dataset.map(data_pipeline.map_data_for_transformer_fn,
+                        num_parallel_calls=tf.data.experimental.AUTOTUNE)
   return dataset
 
 
-def train_input_fn(params, comm_size, rank):
+def train_input_fn(params):
   """Load and return dataset of batched examples for use during training."""
   file_pattern = os.path.join(params["data_dir"] or "", "*train*")
   return _read_and_batch_from_files(
@@ -165,13 +135,10 @@ def train_input_fn(params, comm_size, rank):
       params["max_length"],
       params["max_io_parallelism"],
       shuffle=True,
-      repeat=params["repeat_dataset"],
-      shuffle_seed = 42,
-      comm_size = comm_size,
-      rank = rank)
+      shuffle_seed = 42)
 
 
-def eval_input_fn(params, comm_size, rank):
+def eval_input_fn(params):
   """Load and return dataset of batched examples for use during evaluation."""
   file_pattern = os.path.join(params["data_dir"] or "", "*dev*")
   return _read_and_batch_from_files(
@@ -180,14 +147,11 @@ def eval_input_fn(params, comm_size, rank):
       params["max_length"],
       params["max_io_parallelism"],
       shuffle=False,
-      repeat=1,
-      shuffle_seed=42,
-      comm_size = comm_size,
-      rank = rank)
+      shuffle_seed=42)
 
 
 def map_data_for_transformer_fn(x, y):
-  """Maps data for training, and handles weried behaviors for different vers."""
+  """Maps data for training, and handles weired behaviors for different vers."""
   # Will transform input x and targets y into tuple(x, y) as new model inputs.
   # For TF v2, the 2nd parameter is omitted to make Keras training work.
   return ((x, y),)
