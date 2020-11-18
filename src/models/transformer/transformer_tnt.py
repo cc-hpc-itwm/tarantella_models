@@ -35,15 +35,11 @@ import layer_helpers.multi_head_attention
 tf.keras.layers.experimental.EinsumDense = layer_helpers.einsum_dense.EinsumDense
 tf.keras.layers.MultiHeadAttention = layer_helpers.multi_head_attention.MultiHeadAttention
 
-from official.common import distribute_utils
-from official.modeling import performance
 from official.nlp.transformer import metrics
 from official.nlp.transformer import misc
 from official.nlp.transformer import optimizer
 from official.nlp.transformer import transformer
 from official.nlp.transformer import transformer_main
-from official.nlp.transformer import translate
-from official.nlp.transformer.utils import tokenizer
 from official.utils.flags import core as flags_core
 from official.utils.misc import keras_utils
 
@@ -169,8 +165,6 @@ class TransformerTntTask(object):
         params["optimizer_adam_beta1"],
         params["optimizer_adam_beta2"],
         epsilon=params["optimizer_adam_epsilon"])
-
-    opt = performance.configure_optimizer(opt)
     return opt
 
 
