@@ -16,10 +16,15 @@ FLAGS = flags.FLAGS
 
 PARAMS_MAP = {
     'tiny': model_params.TINY_PARAMS,
-    'base': model_params.BASE_PARAMS,
-    'big': model_params.BIG_PARAMS,
+    'base': model_params.BASE_MULTI_GPU_PARAMS,
+    'big': model_params.BIG_MULTI_GPU_PARAMS,
 }
 
+def get_model_params(param_set):
+  """Gets predefined model params."""
+  if param_set not in PARAMS_MAP:
+    raise ValueError('Not valid params: param_set={}'.format(param_set))
+  return PARAMS_MAP[param_set].copy()
 
 def define_transformer_flags():
   # add common flags

@@ -36,7 +36,6 @@ tf.keras.layers.experimental.EinsumDense = layer_helpers.einsum_dense.EinsumDens
 tf.keras.layers.MultiHeadAttention = layer_helpers.multi_head_attention.MultiHeadAttention
 
 from official.nlp.transformer import metrics
-from official.nlp.transformer import misc
 from official.nlp.transformer import optimizer
 from official.nlp.transformer import transformer
 from official.nlp.transformer import transformer_main
@@ -44,7 +43,7 @@ from official.utils.flags import core as flags_core
 from official.utils.misc import keras_utils
 
 import data_pipeline
-import misc as tnt_misc
+import misc
 
 import tarantella as tnt
 
@@ -93,10 +92,7 @@ class TransformerTntTask(object):
     self.flags_obj = flags_obj
     self.predict_model = None
 
-    # Add flag-defined parameters to params object
-    num_gpus = flags_core.get_num_gpus(flags_obj)
-    self.params = misc.get_model_params(flags_obj.param_set, num_gpus)
-
+    self.params = misc.get_model_params(flags_obj.param_set)
     self.params["train_epochs"] = flags_obj.train_epochs
     self.params["batch_size"] = flags_obj.batch_size or self.params["default_batch_size"]
 
@@ -105,12 +101,11 @@ class TransformerTntTask(object):
     self.params["max_length"] = flags_obj.max_length
     self.params["decode_batch_size"] = flags_obj.decode_batch_size
     self.params["decode_max_length"] = flags_obj.decode_max_length
-    self.params["padded_decode"] = flags_obj.padded_decode
     self.params["max_io_parallelism"] = (
         flags_obj.num_parallel_calls or tf.data.experimental.AUTOTUNE)
 
     self.params["use_synthetic_data"] = flags_obj.use_synthetic_data
-    self.params["dtype"] = flags_core.get_tf_dtype(flags_obj)
+    self.params["dtype"] = tf.float32
 
     self.internal_model = transformer.Transformer(self.params, name="transformer_v2")
 
@@ -180,7 +175,7 @@ def main(_):
   task.eval()
 
 if __name__ == "__main__":
-  tnt_misc.define_transformer_flags()
+  misc.define_transformer_flags()
   app.run(main)
 
 
