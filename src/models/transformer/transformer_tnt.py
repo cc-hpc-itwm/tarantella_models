@@ -111,20 +111,16 @@ class TransformerTntTask(object):
 
     self.params["use_synthetic_data"] = flags_obj.use_synthetic_data
     self.params["dtype"] = flags_core.get_tf_dtype(flags_obj)
-    self.params["enable_metrics_in_training"] = flags_obj.enable_metrics_in_training
 
     self.internal_model = transformer.Transformer(self.params, name="transformer_v2")
 
   def train(self):
     """Trains the model."""
-    flags_obj = self.flags_obj
-    
     model = create_model(self.internal_model, self.params, is_train=True)
     model = tnt.Model(model)
     
     opt = self._create_optimizer()
     model.compile(opt)
-    model.summary()
 
     train_ds = data_pipeline.train_input_fn(self.params)
 
@@ -145,8 +141,8 @@ class TransformerTntTask(object):
 
   def eval(self):
     """Evaluates the model."""
+
     logging.info("Start evaluation")
-  
     if not self.predict_model:
       self.predict_model = create_model(self.internal_model, self.params, False)
     return transformer_main.evaluate_and_log_bleu(
