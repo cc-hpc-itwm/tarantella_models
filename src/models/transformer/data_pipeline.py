@@ -79,7 +79,8 @@ def _read_and_batch_from_files(file_pattern,
                                max_io_parallelism,
                                shuffle,
                                shuffle_seed,
-                               comm_size, rank):
+                               num_ranks,
+                               rank):
   """Create dataset where each item is a dict of "inputs" and "targets".
 
   Args:
@@ -91,7 +92,8 @@ def _read_and_batch_from_files(file_pattern,
     max_io_parallelism: Max number of cpu cores for parallel input processing.
     shuffle: If true, randomizes order of elements.
     shuffle_seed: Fixed seed to be used for shuffling.
-
+    num_ranks: Total number of ranks involved in parallel training.
+    rank: Rank of the current process.
   Returns:
     tf.data.Dataset object containing examples loaded from the files.
   """
@@ -107,38 +109,28 @@ def _read_and_batch_from_files(file_pattern,
       num_parallel_calls=tf.data.experimental.AUTOTUNE).with_options(options)
 
   # Parse each tf.Example into a dictionary
-  # TODO: Look into prefetch_input_elements for performance optimization.
   dataset = dataset.map(
       data_pipeline._parse_example, num_parallel_calls=tf.data.experimental.AUTOTUNE)
 
   # Remove examples where the input or target length exceeds the maximum length,
   dataset = dataset.filter(lambda x, y: data_pipeline._filter_max_length((x, y), max_length))
  
-#   dataset = dataset.padded_batch(
-#         # First calculate batch size (token number) per worker, then divide it
-#         # into sentences, and finally expand to a global batch. It could prove
-#         # the global batch divisble for distribution strategy.
-#         int(batch_size // comm_size // max_length) * comm_size,
-#         ([max_length], [max_length]),
-#         drop_remainder=True)
-#   dataset = dataset.unbatch()
+  # Group records into fixed-length sentences and then batch sentences together
+  number_sentences =  int(batch_size // max_length)
+  if number_sentences % num_ranks > 0:
+    raise ValueError(
+      "The required number of sentences per batch ({}/{}) is not a multiple of the number of ranks {}".format(
+      batch_size, max_length, num_ranks))
 
-#   dataset = dataset.shard(comm_size, rank)
-#   dataset = dataset.padded_batch(
-#         # First calculate batch size (token number) per worker, then divide it
-#         # into sentences, and finally expand to a global batch. It could prove
-#         # the global batch divisble for distribution strategy.
-#         int(batch_size // comm_size // max_length),
-#         ([max_length], [max_length]),
-#         drop_remainder=True)
+  # Compute the micro_batch_size per rank
+  micro_batch_size = number_sentences // num_ranks
 
-  dataset = dataset.padded_batch(
-        # First calculate batch size (token number) per worker, then divide it
-        # into sentences, and finally expand to a global batch. It could prove
-        # the global batch divisble for distribution strategy.
-        int(batch_size // max_length),
-        ([max_length], [max_length]),
-        drop_remainder=True)
+  # Batch records and select only the shard (subset) corresponding to the current rank
+  dataset = dataset.padded_batch(micro_batch_size,
+                                 ([max_length], [max_length]),
+                                 drop_remainder=True)
+  dataset = dataset.shard(num_ranks, rank)
+  dataset = dataset.repeat()
 
   # Prefetch the next element to improve speed of input pipeline.
   dataset = dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
@@ -147,7 +139,7 @@ def _read_and_batch_from_files(file_pattern,
   return dataset
 
 
-def train_input_fn(params, comm_size, rank):
+def train_input_fn(params, num_ranks, rank, shuffle_seed):
   """Load and return dataset of batched examples for use during training."""
   file_pattern = os.path.join(params["data_dir"] or "", "*train*")
   return _read_and_batch_from_files(
@@ -155,11 +147,13 @@ def train_input_fn(params, comm_size, rank):
       params["batch_size"],
       params["max_length"],
       params["max_io_parallelism"],
-      shuffle=True,
-      shuffle_seed = 42, comm_size = comm_size, rank=rank)
+      shuffle = True,
+      shuffle_seed = shuffle_seed,
+      num_ranks = num_ranks,
+      rank = rank)
 
 
-def eval_input_fn(params):
+def eval_input_fn(params, num_ranks, rank):
   """Load and return dataset of batched examples for use during evaluation."""
   file_pattern = os.path.join(params["data_dir"] or "", "*dev*")
   return _read_and_batch_from_files(
@@ -167,8 +161,10 @@ def eval_input_fn(params):
       params["batch_size"],
       params["max_length"],
       params["max_io_parallelism"],
-      shuffle=False,
-      shuffle_seed=42,comm_size = 1, rank = 0)
+      shuffle = False,
+      shuffle_seed = None,
+      num_ranks = num_ranks,
+      rank = rank)
 
 
 def map_data_for_transformer_fn(x, y):

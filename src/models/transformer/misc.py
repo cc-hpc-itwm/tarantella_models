@@ -28,7 +28,11 @@ def get_model_params(param_set):
 
 def define_transformer_flags():
   # add common flags
-  flags_core.define_base(num_gpu=False, distribution_strategy=False)
+  flags_core.define_base(data_dir=True, model_dir=True, clean=False, train_epochs=True,
+                         epochs_between_evals=True, stop_threshold=False,
+                         batch_size=True, num_gpu=False, hooks=False, export_dir=False,
+                         distribution_strategy=False, run_eagerly=False)
+
   flags_core.define_performance(
       num_parallel_calls=True,
       inter_op=False,
@@ -46,16 +50,6 @@ def define_transformer_flags():
   )
 
   flags_core.define_benchmark()
-
-  flags.DEFINE_integer(
-      name='train_steps', short_name='ts', default=300000,
-      help=flags_core.help_wrap('The number of steps used to train.'))
-
-  flags.DEFINE_integer(
-      name='steps_between_evals', short_name='sbe', default=5000,
-      help=flags_core.help_wrap(
-          'The Number of training steps to run between evaluations. This is '
-          'used if --train_steps is defined.'))
 
   flags.DEFINE_boolean(
       name='enable_time_history', default=True,
@@ -92,11 +86,6 @@ def define_transformer_flags():
           'Max sentence length for Transformer. Default is 256. Note: Usually '
           'it is more effective to use a smaller max length if static_batch is '
           'enabled, e.g. 64.'))
-
-  # Flags for training with steps (may be used for debugging)
-  flags.DEFINE_integer(
-      name='validation_steps', short_name='vs', default=64,
-      help=flags_core.help_wrap('The number of steps used in validation.'))
 
   # BLEU score computation
   flags.DEFINE_string(
@@ -162,13 +151,5 @@ def define_transformer_flags():
   # pylint: enable=unused-variable
 
   flags.DEFINE_integer(
-    name='train_epochs',
-    default=1,
-    help=flags_core.help_wrap(
-        'Number of training epochs'))
-  flags.DEFINE_integer(
-    name='vocab_size',
-    default=33786,
-    help=flags_core.help_wrap(
-        'Number of tokens generated when running `transformer/data_download.py`'))
-
+      name='steps_per_epoch', short_name='spe', default=10000,
+      help=flags_core.help_wrap('The number of steps used to train.'))

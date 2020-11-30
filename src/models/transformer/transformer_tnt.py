@@ -36,6 +36,7 @@ tf.keras.layers.experimental.EinsumDense = layer_helpers.einsum_dense.EinsumDens
 tf.keras.layers.MultiHeadAttention = layer_helpers.multi_head_attention.MultiHeadAttention
 
 from official.nlp.transformer import metrics
+from official.nlp.transformer import misc
 from official.nlp.transformer import optimizer
 from official.nlp.transformer import transformer
 from official.nlp.transformer import transformer_main
@@ -43,10 +44,9 @@ from official.utils.flags import core as flags_core
 from official.utils.misc import keras_utils
 
 import data_pipeline
-import misc
+import tnt_misc
 
 import tarantella as tnt
-
 tnt.init()
   
 def create_model(internal_model, params, is_train):
@@ -55,8 +55,8 @@ def create_model(internal_model, params, is_train):
     if is_train:
       inputs = tf.keras.layers.Input((None,), dtype="int64", name="inputs")
       targets = tf.keras.layers.Input((None,), dtype="int64", name="targets")
-      
       logits = internal_model([inputs, targets], training=is_train)
+
       vocab_size = params["vocab_size"]
       label_smoothing = params["label_smoothing"]
       if params["enable_metrics_in_training"]:
@@ -85,15 +85,12 @@ class TransformerTntTask(object):
 
     Args:
       flags_obj: Object containing parsed flag values, i.e., FLAGS.
-
-    Raises:
-      ValueError: if not using static batch for input data on TPU.
     """
     self.flags_obj = flags_obj
-    self.predict_model = None
-
-    self.params = misc.get_model_params(flags_obj.param_set)
+    self.params = tnt_misc.get_model_params(flags_obj.param_set)
     self.params["train_epochs"] = flags_obj.train_epochs
+    self.params["epochs_between_evals"] = flags_obj.epochs_between_evals
+    self.params["steps_per_epoch"] = flags_obj.steps_per_epoch
     self.params["batch_size"] = flags_obj.batch_size or self.params["default_batch_size"]
 
     self.params["data_dir"] = flags_obj.data_dir
@@ -107,59 +104,83 @@ class TransformerTntTask(object):
     self.params["use_synthetic_data"] = flags_obj.use_synthetic_data
     self.params["dtype"] = tf.float32
 
-    self.internal_model = transformer.Transformer(self.params, name="transformer_v2")
+    # Transformer model used both as Tarantella model (in training) and as a serial
+    # model for inference
+    internal_model = transformer.Transformer(self.params, name="transformer_v2")
 
-  def train(self):
+    # The train model includes an additional logits layer and a customized loss
+    self.train_model = create_model(internal_model, self.params, is_train = True)
+    # Enable distributed training
+    self.train_model = tnt.Model(model)
+
+    # The inference model is wrapped as a different Keras model that does not use labels
+    self.predict_model = create_model(internal_model, self.params, is_train = False)
+
+  def train_and_eval(self):
     """Trains the model."""
-    model = create_model(self.internal_model, self.params, is_train=True)
-    model = tnt.Model(model)
-    
-    opt = self._create_optimizer()
-    model.compile(opt)
+    lr_schedule = optimizer.LearningRateSchedule(self.params["learning_rate"], self.params["hidden_size"],
+                                                 self.params["learning_rate_warmup_steps"])
+    optimizer = tf.keras.optimizers.Adam(lr_schedule,
+                                         self.params["optimizer_adam_beta1"],
+                                         self.params["optimizer_adam_beta2"],
+                                         epsilon=self.params["optimizer_adam_epsilon"])
+    model.compile(optimizer)
 
-    train_ds = data_pipeline.train_input_fn(self.params, tnt.get_size(), tnt.get_rank())
+    # create train dataset
+    train_ds = data_pipeline.train_input_fn(self.params,
+                                            shuffle_seed = 42,
+                                            num_ranks = tnt.get_size(),
+                                            rank = tnt.get_rank())
 
-    logging.warn("Dataseeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeet {}".format(train_ds.element_spec))
+    # enable global callbacks
     callbacks = []
     if self.flags_obj.enable_tensorboard:
       callbacks.append(tf.keras.callbacks.TensorBoard(log_dir=self.flags_obj.model_dir))
 
-    logging.info("Start train")
-    history = model.fit(train_ds,
-                        epochs=self.params["train_epochs"],
-                        callbacks=callbacks,
-                        #tnt_distribute_dataset = False,
-                        verbose=1)
-    logging.info("Train history: {}".format(history.history))
+    # enable logging callbacks only on a specific rank
+    if tnt.is_master_rank():
+      if self.flags_obj.enable_time_history:
+        time_callback = keras_utils.TimeHistory(self.params["batch_size"],
+                                                self.params["steps_per_epoch"],
+                                                logdir = None)
+        callbacks.append(time_callback)
 
-    stats = {}
-    misc.update_stats(history, stats, callbacks)
+    # print messages only on the master rank
+    if tnt.is_master_rank():
+      logging.info("Start train")
+
+    for epoch in range(1, self.params["epochs_between_evals"], self.params["train_epochs"] + 1):
+      # as our dataset is distributed manually, disable the automatic Tarantella distribution
+      history = model.fit(train_ds,
+                          callbacks = callbacks,
+                          tnt_distribute_dataset = False,
+                          steps_per_epoch = self.params["steps_per_epoch"],
+                          initial_epoch = epoch,
+                          epochs = epoch + self.params["epochs_between_evals"]
+                          verbose = 1)
+
+      if tnt.is_master_rank():
+        logging.info("Train history: {}".format(history.history))
+        stats = {}
+        misc.update_stats(history, stats, callbacks)
+
+      if tnt.is_master_rank():
+        eval_stats = self.eval()
+        stats.update(eval_stats)
+
     return stats
 
   def eval(self):
     """Evaluates the model."""
-
     logging.info("Start evaluation")
-    if not self.predict_model:
-      self.predict_model = create_model(self.internal_model, self.params, False)
-    return transformer_main.evaluate_and_log_bleu(
-        self.predict_model, self.params, self.flags_obj.bleu_source,
-        self.flags_obj.bleu_ref, self.flags_obj.vocab_file)
-
-
-  def _create_optimizer(self):
-    """Creates optimizer."""
-    params = self.params
-    lr_schedule = optimizer.LearningRateSchedule(
-        params["learning_rate"], params["hidden_size"],
-        params["learning_rate_warmup_steps"])
-    opt = tf.keras.optimizers.Adam(
-        lr_schedule,
-        params["optimizer_adam_beta1"],
-        params["optimizer_adam_beta2"],
-        epsilon=params["optimizer_adam_epsilon"])
-    return opt
-
+    uncased_score, cased_score = transformer_main.evaluate_and_log_bleu(
+                                      self.predict_model, self.params, self.flags_obj.bleu_source,
+                                      self.flags_obj.bleu_ref, self.flags_obj.vocab_file)
+    stats = {}
+    if uncased_score and cased_score:
+      stats["bleu_uncased"] = uncased_score
+      stats["bleu_cased"] = cased_score
+    return stats
 
 def main(_):
   flags_obj = flags.FLAGS
@@ -173,11 +194,10 @@ def main(_):
         datasets_num_private_threads=flags_obj.datasets_num_private_threads)
 
   task = TransformerTntTask(flags_obj)
-  task.train()
-  task.eval()
+  task.train_and_eval()
 
 if __name__ == "__main__":
-  misc.define_transformer_flags()
+  tnt_misc.define_transformer_flags()
   app.run(main)
 
 
