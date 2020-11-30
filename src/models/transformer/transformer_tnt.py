@@ -117,8 +117,9 @@ class TransformerTntTask(object):
     opt = self._create_optimizer()
     model.compile(opt)
 
-    train_ds = data_pipeline.train_input_fn(self.params)
+    train_ds = data_pipeline.train_input_fn(self.params, tnt.get_size(), tnt.get_rank())
 
+    logging.warn("Dataseeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeet {}".format(train_ds.element_spec))
     callbacks = []
     if self.flags_obj.enable_tensorboard:
       callbacks.append(tf.keras.callbacks.TensorBoard(log_dir=self.flags_obj.model_dir))
@@ -127,6 +128,7 @@ class TransformerTntTask(object):
     history = model.fit(train_ds,
                         epochs=self.params["train_epochs"],
                         callbacks=callbacks,
+                        #tnt_distribute_dataset = False,
                         verbose=1)
     logging.info("Train history: {}".format(history.history))
 

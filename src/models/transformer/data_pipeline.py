@@ -78,7 +78,8 @@ def _read_and_batch_from_files(file_pattern,
                                max_length,
                                max_io_parallelism,
                                shuffle,
-                               shuffle_seed = 42):
+                               shuffle_seed,
+                               comm_size, rank):
   """Create dataset where each item is a dict of "inputs" and "targets".
 
   Args:
@@ -112,13 +113,33 @@ def _read_and_batch_from_files(file_pattern,
 
   # Remove examples where the input or target length exceeds the maximum length,
   dataset = dataset.filter(lambda x, y: data_pipeline._filter_max_length((x, y), max_length))
-
-  # Use the number of sentences as the actual batch size, instead of the 
-  # `number of tokens` provided by the user
-  dataset = dataset.padded_batch(int(batch_size // max_length),
-                                 ([max_length], [max_length]),
-                                 drop_remainder=True)
  
+#   dataset = dataset.padded_batch(
+#         # First calculate batch size (token number) per worker, then divide it
+#         # into sentences, and finally expand to a global batch. It could prove
+#         # the global batch divisble for distribution strategy.
+#         int(batch_size // comm_size // max_length) * comm_size,
+#         ([max_length], [max_length]),
+#         drop_remainder=True)
+#   dataset = dataset.unbatch()
+
+#   dataset = dataset.shard(comm_size, rank)
+#   dataset = dataset.padded_batch(
+#         # First calculate batch size (token number) per worker, then divide it
+#         # into sentences, and finally expand to a global batch. It could prove
+#         # the global batch divisble for distribution strategy.
+#         int(batch_size // comm_size // max_length),
+#         ([max_length], [max_length]),
+#         drop_remainder=True)
+
+  dataset = dataset.padded_batch(
+        # First calculate batch size (token number) per worker, then divide it
+        # into sentences, and finally expand to a global batch. It could prove
+        # the global batch divisble for distribution strategy.
+        int(batch_size // max_length),
+        ([max_length], [max_length]),
+        drop_remainder=True)
+
   # Prefetch the next element to improve speed of input pipeline.
   dataset = dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
   dataset = dataset.map(data_pipeline.map_data_for_transformer_fn,
@@ -126,7 +147,7 @@ def _read_and_batch_from_files(file_pattern,
   return dataset
 
 
-def train_input_fn(params):
+def train_input_fn(params, comm_size, rank):
   """Load and return dataset of batched examples for use during training."""
   file_pattern = os.path.join(params["data_dir"] or "", "*train*")
   return _read_and_batch_from_files(
@@ -135,7 +156,7 @@ def train_input_fn(params):
       params["max_length"],
       params["max_io_parallelism"],
       shuffle=True,
-      shuffle_seed = 42)
+      shuffle_seed = 42, comm_size = comm_size, rank=rank)
 
 
 def eval_input_fn(params):
@@ -147,7 +168,7 @@ def eval_input_fn(params):
       params["max_length"],
       params["max_io_parallelism"],
       shuffle=False,
-      shuffle_seed=42)
+      shuffle_seed=42,comm_size = 1, rank = 0)
 
 
 def map_data_for_transformer_fn(x, y):
