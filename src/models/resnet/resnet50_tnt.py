@@ -1,14 +1,7 @@
-import logging
-import os
-
-from official.utils.misc import keras_utils
-from official.utils.misc import model_helpers
-from official.vision.image_classification.resnet import common as tf_common
-from official.vision.image_classification.resnet import imagenet_preprocessing as tf_imagenet_preprocessing
-from official.vision.image_classification.resnet import resnet_model
-
 from absl import app
 from absl import flags
+import logging
+import os
 
 import tensorflow as tf
 from tensorflow.python.keras.optimizer_v2 import gradient_descent as gradient_descent_v2
@@ -16,13 +9,17 @@ from tensorflow.python.keras.optimizer_v2 import gradient_descent as gradient_de
 import common
 import imagenet_preprocessing
 
+# Official Resnet50 model
+from official.vision.image_classification.resnet import resnet_model
+
+# Enable Tarantella
 import tarantella as tnt
 tnt.init()
 
 def get_optimizer(batch_size):
-  lr_schedule = tf_common.PiecewiseConstantDecayWithWarmup(
+  lr_schedule = common.PiecewiseConstantDecayWithWarmup(
                         batch_size=batch_size,
-                        epoch_size=tf_imagenet_preprocessing.NUM_IMAGES['train'],
+                        epoch_size=imagenet_preprocessing.NUM_IMAGES['train'],
                         warmup_epochs=common.LR_SCHEDULE[0][1],
                         boundaries=list(p[1] for p in common.LR_SCHEDULE[1:]),
                         multipliers=list(p[0] for p in common.LR_SCHEDULE),
@@ -33,8 +30,8 @@ def get_optimizer(batch_size):
 def main(_):
   flags_obj = flags.FLAGS
 
-  # Create model
-  model = resnet_model.resnet50(num_classes=tf_imagenet_preprocessing.NUM_CLASSES)
+  # Create model and wrap it into a Tarantella model
+  model = resnet_model.resnet50(num_classes=imagenet_preprocessing.NUM_CLASSES)
   model = tnt.Model(model)
 
   optimizer = get_optimizer(flags_obj.batch_size)
@@ -74,11 +71,10 @@ def main(_):
                       verbose=1)
   logging.info("Train history: {}".format(history.history))
 
-  stats = {}
   eval_output = model.evaluate(datasets['validation'],
                                steps=num_val_steps,
                                verbose=1)
-  stats = tf_common.build_stats(history, eval_output, callbacks)
+  
 
 if __name__ == '__main__':
   common.define_keras_flags()
