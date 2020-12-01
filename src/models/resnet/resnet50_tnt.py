@@ -10,7 +10,10 @@ import common
 import imagenet_preprocessing
 
 # Official Resnet50 model
-from official.vision.image_classification.resnet import resnet_model
+try:
+  from official.vision.image_classification.resnet import resnet_model
+except:
+  from official.vision.image_classification import resnet_model
 
 # Enable Tarantella
 import tarantella as tnt
@@ -71,8 +74,7 @@ def main(_):
                       verbose=1)
   logging.info("Train history: {}".format(history.history))
 
-  eval_output = model.evaluate(datasets['validation'],
-                               steps=num_val_steps,
+  eval_output = model.evaluate(validation_dataset,
                                verbose=1)
   
 
