@@ -151,5 +151,17 @@ def define_transformer_flags():
   # pylint: enable=unused-variable
 
   flags.DEFINE_integer(
-      name='steps_per_epoch', short_name='spe', default=10000,
-      help=flags_core.help_wrap('The number of steps used to train.'))
+      name='vocab_size',
+      default=33786,
+      help=flags_core.help_wrap(
+        'Number of tokens generated when running `transformer/data_download.py`'))
+
+  flags.DEFINE_integer(
+      name='num_sentences', default=10000,
+      help=flags_core.help_wrap('The number of sentences used in training.'))
+
+  flags.DEFINE_integer(
+      name='num_eval_sentences', default=3000,
+      help=flags_core.help_wrap('The number of sentences used in evaluation.'))
+
+

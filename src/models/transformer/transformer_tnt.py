@@ -40,11 +40,12 @@ from official.nlp.transformer import misc
 from official.nlp.transformer import optimizer
 from official.nlp.transformer import transformer
 from official.nlp.transformer import transformer_main
+from official.nlp.transformer.utils import tokenizer
 from official.utils.flags import core as flags_core
 from official.utils.misc import keras_utils
 
 import data_pipeline
-import tnt_misc
+import misc as tnt_misc
 
 import tarantella as tnt
 tnt.init()
@@ -90,7 +91,8 @@ class TransformerTntTask(object):
     self.params = tnt_misc.get_model_params(flags_obj.param_set)
     self.params["train_epochs"] = flags_obj.train_epochs
     self.params["epochs_between_evals"] = flags_obj.epochs_between_evals
-    self.params["steps_per_epoch"] = flags_obj.steps_per_epoch
+    self.params["num_sentences"] = flags_obj.num_sentences
+    self.params["num_eval_sentences"] = flags_obj.num_eval_sentences
     self.params["batch_size"] = flags_obj.batch_size or self.params["default_batch_size"]
 
     self.params["data_dir"] = flags_obj.data_dir
@@ -111,7 +113,7 @@ class TransformerTntTask(object):
     # The train model includes an additional logits layer and a customized loss
     self.train_model = create_model(internal_model, self.params, is_train = True)
     # Enable distributed training
-    self.train_model = tnt.Model(model)
+    self.train_model = tnt.Model(self.train_model)
 
     # The inference model is wrapped as a different Keras model that does not use labels
     self.predict_model = create_model(internal_model, self.params, is_train = False)
@@ -120,11 +122,12 @@ class TransformerTntTask(object):
     """Trains the model."""
     lr_schedule = optimizer.LearningRateSchedule(self.params["learning_rate"], self.params["hidden_size"],
                                                  self.params["learning_rate_warmup_steps"])
-    optimizer = tf.keras.optimizers.Adam(lr_schedule,
-                                         self.params["optimizer_adam_beta1"],
-                                         self.params["optimizer_adam_beta2"],
-                                         epsilon=self.params["optimizer_adam_epsilon"])
-    model.compile(optimizer)
+    opt = tf.keras.optimizers.Adam(lr_schedule,
+                                   self.params["optimizer_adam_beta1"],
+                                   self.params["optimizer_adam_beta2"],
+                                   epsilon=self.params["optimizer_adam_epsilon"])
+    self.train_model.compile(opt)
+    self.train_model.summary()
 
     # create train dataset
     train_ds = data_pipeline.train_input_fn(self.params,
@@ -141,28 +144,28 @@ class TransformerTntTask(object):
     if tnt.is_master_rank():
       if self.flags_obj.enable_time_history:
         time_callback = keras_utils.TimeHistory(self.params["batch_size"],
-                                                self.params["steps_per_epoch"],
+                                                self.params["num_sentences"],
                                                 logdir = None)
         callbacks.append(time_callback)
 
-    # print messages only on the master rank
+    # print messages only once
     if tnt.is_master_rank():
       logging.info("Start train")
 
-    for epoch in range(1, self.params["epochs_between_evals"], self.params["train_epochs"] + 1):
+    stats = {}
+    for epoch in range(0, self.params["train_epochs"], self.params["epochs_between_evals"]):
       # as our dataset is distributed manually, disable the automatic Tarantella distribution
-      history = model.fit(train_ds,
-                          callbacks = callbacks,
-                          tnt_distribute_dataset = False,
-                          steps_per_epoch = self.params["steps_per_epoch"],
-                          initial_epoch = epoch,
-                          epochs = epoch + self.params["epochs_between_evals"]
-                          verbose = 1)
+      history = self.train_model.fit(train_ds,
+                                     callbacks = callbacks,
+                                     tnt_distribute_dataset = False,
+                                     initial_epoch = epoch,
+                                     epochs = epoch + min(self.params["epochs_between_evals"],
+                                                          self.params["train_epochs"]-epoch),
+                                     verbose = 2)
 
       if tnt.is_master_rank():
         logging.info("Train history: {}".format(history.history))
-        stats = {}
-        misc.update_stats(history, stats, callbacks)
+        stats = misc.build_stats(history, callbacks)
 
       if tnt.is_master_rank():
         eval_stats = self.eval()
@@ -172,11 +175,19 @@ class TransformerTntTask(object):
 
   def eval(self):
     """Evaluates the model."""
+    stats = {}
+    
+    if not (self.flags_obj.bleu_source and self.flags_obj.bleu_ref):
+      logging.info("No evaluation dataset provided. Skippping evaluation.")
+      return stats
+
     logging.info("Start evaluation")
     uncased_score, cased_score = transformer_main.evaluate_and_log_bleu(
-                                      self.predict_model, self.params, self.flags_obj.bleu_source,
-                                      self.flags_obj.bleu_ref, self.flags_obj.vocab_file)
-    stats = {}
+                                                self.predict_model,
+                                                self.params,
+                                                self.flags_obj.bleu_source,
+                                                self.flags_obj.bleu_ref,
+                                                self.flags_obj.vocab_file)
     if uncased_score and cased_score:
       stats["bleu_uncased"] = uncased_score
       stats["bleu_cased"] = cased_score
