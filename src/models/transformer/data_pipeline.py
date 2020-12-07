@@ -141,7 +141,7 @@ def _read_and_batch_from_files(file_pattern,
   # Compute the micro_batch_size per rank
   micro_batch_size = number_batch_sentences // num_ranks
 
-  # Batch records and select only the shard (subset) corresponding to the current rank
+  # Batch the sentences and select only the shard (subset) corresponding to the current rank
   dataset = dataset.padded_batch(micro_batch_size,
                                  ([max_length], [max_length]),
                                  drop_remainder=True)
