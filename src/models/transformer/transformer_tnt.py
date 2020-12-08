@@ -137,7 +137,7 @@ class TransformerTntTask(object):
 
     # enable global callbacks
     callbacks = []
-    if self.flags_obj.enable_tensorboard:
+    if self.flags_obj.enable_tensorboard and self.flags_obj.model_dir:
       callbacks.append(tf.keras.callbacks.TensorBoard(log_dir=self.flags_obj.model_dir))
 
     # enable logging callbacks only on a specific rank
