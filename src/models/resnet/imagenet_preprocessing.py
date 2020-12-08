@@ -15,8 +15,18 @@
 import logging
 import os
 
-from official.vision.image_classification.resnet import imagenet_preprocessing as tf_imagenet_preprocessing
+try:
+  from official.vision.image_classification.resnet import imagenet_preprocessing as tf_imagenet_preprocessing
+except:
+  from official.vision.image_classification import imagenet_preprocessing as tf_imagenet_preprocessing
+
 import tensorflow as tf
+
+NUM_CLASSES = 1001
+NUM_IMAGES = {
+    'train': 1281167,
+    'validation': 50000,
+}
 
 def input_fn(is_training,
              data_dir,

@@ -18,14 +18,13 @@ from absl import flags
 import tensorflow as tf
 
 from official.utils.flags import core as flags_core
-from official.utils.misc import keras_utils
 
 FLAGS = flags.FLAGS
 BASE_LEARNING_RATE = 0.1  # This matches Jing's version.
 TRAIN_TOP_1 = 'training_accuracy_top_1'
 LR_SCHEDULE = [  # (multiplier, epoch to start) tuples
-    (1.0, 5), (0.1, 30), (0.01, 60), (0.001, 80)
-]
+                (1.0, 5), (0.1, 30), (0.01, 60), (0.001, 80)
+              ]
 
 
 class PiecewiseConstantDecayWithWarmup(
