@@ -35,7 +35,9 @@ def input_fn(is_training,
              datasets_num_private_threads=None,
              drop_remainder=False,
              training_dataset_cache=False,
-             filenames=None):
+             filenames=None,
+             rank=0,
+             comm_size=1):
   """Input function which provides batches for train or eval.
 
   Args:
@@ -88,5 +90,7 @@ def input_fn(is_training,
                         num_parallel_calls=tf.data.experimental.AUTOTUNE)
 
   dataset = dataset.batch(batch_size, drop_remainder=drop_remainder)
+  # shard the dataset
+  dataset.shard(num_shards=comm_size, index=rank)
   dataset = dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
   return dataset
