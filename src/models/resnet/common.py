@@ -148,6 +148,11 @@ def define_keras_flags(dynamic_loss_scale=True,
     default=100,
     help="Logging frequency"
   )
+  flags.DEFINE_boolean(
+    name="auto_distributed",
+    default=True,
+    help="Distribute dataset automatically between ranks"
+  )
   flags.DEFINE_integer(
     name="print_freq",
     default=100,

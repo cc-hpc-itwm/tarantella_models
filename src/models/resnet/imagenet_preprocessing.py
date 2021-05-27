@@ -37,7 +37,8 @@ def input_fn(is_training,
              training_dataset_cache=False,
              filenames=None,
              rank=0,
-             comm_size=1):
+             comm_size=1,
+             auto_distributed=True):
   """Input function which provides batches for train or eval.
 
   Args:
@@ -59,6 +60,11 @@ def input_fn(is_training,
   if filenames is None:
     filenames = tf_imagenet_preprocessing.get_filenames(is_training, data_dir)
   dataset = tf.data.Dataset.from_tensor_slices(filenames)
+
+  if not auto_distributed:
+    logging.info('Dataset: apply sharding')
+    # shard the dataset
+    dataset.shard(num_shards=comm_size, index=rank)
 
   if is_training:
     # Shuffle the input files
@@ -90,7 +96,5 @@ def input_fn(is_training,
                         num_parallel_calls=tf.data.experimental.AUTOTUNE)
 
   dataset = dataset.batch(batch_size, drop_remainder=drop_remainder)
-  # shard the dataset
-  dataset.shard(num_shards=comm_size, index=rank)
   dataset = dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
   return dataset

@@ -31,9 +31,35 @@ def get_optimizer(batch_size):
 
 def main(_):
   flags_obj = flags.FLAGS
+
   # get rank and comm_size
   rank = tnt.get_rank()
   comm_size = tnt.get_size()
+
+  # compute micro batch if the dataset is not automatically distributed by Tarantella
+  if not flags_obj.auto_distributed:
+    batch_size = flags_obj.batch_size // comm_size
+  else:
+    batch_size = flags_obj.batch_size
+
+  # Load and preprocess datasets
+  train_dataset = imagenet_preprocessing.input_fn(is_training=True,
+                                                  data_dir=flags_obj.data_dir,
+                                                  batch_size=batch_size,
+                                                  shuffle_seed = 42,
+                                                  drop_remainder=True,
+                                                  rank=rank,
+                                                  comm_size= comm_size,
+                                                  auto_distributed=flags_obj.auto_distributed)
+  validation_dataset = imagenet_preprocessing.input_fn(is_training=False,
+                                                       data_dir=flags_obj.data_dir,
+                                                       batch_size=batch_size,
+                                                       shuffle_seed = 42,
+                                                       drop_remainder=True,
+                                                       rank=rank,
+                                                       comm_size=comm_size,
+                                                       auto_distributed=flags_obj.auto_distributed)
+
   # Create model and wrap it into a Tarantella model
   model = resnet_model.resnet50(num_classes=imagenet_preprocessing.NUM_CLASSES)
   model = tnt.Model(model)
@@ -44,28 +70,12 @@ def main(_):
                 metrics=(['sparse_categorical_accuracy']))
   model.summary()
 
-  # Load and preprocess datasets
-  train_dataset = imagenet_preprocessing.input_fn(is_training=True,
-                                                  data_dir=flags_obj.data_dir,
-                                                  batch_size=flags_obj.batch_size,
-                                                  shuffle_seed = 42,
-                                                  drop_remainder=True,
-                                                  rank=rank,
-                                                  comm_size= comm_size)
-  validation_dataset = imagenet_preprocessing.input_fn(is_training=False,
-                                                       data_dir=flags_obj.data_dir,
-                                                       batch_size=flags_obj.batch_size,
-                                                       shuffle_seed = 42,
-                                                       drop_remainder=True,
-                                                       rank=rank,
-                                                       comm_size=comm_size)
-
   callbacks = []
   if flags_obj.enable_tensorboard:
     callbacks.append(tf.keras.callbacks.TensorBoard(log_dir=flags_obj.model_dir,
                                                     profile_batch=2))
   if flags_obj.profile_runtime:
-    callbacks.append(RuntimeProfiler(batch_size = flags_obj.batch_size,
+    callbacks.append(RuntimeProfiler(batch_size = batch_size,
                                     logging_freq = flags_obj.logging_freq,
                                     print_freq = flags_obj.print_freq))
 
@@ -75,20 +85,20 @@ def main(_):
       callbacks.append(tf.keras.callbacks.ModelCheckpoint(ckpt_full_path, save_weights_only=True))
 
   logging.info("Start training")
-  kwargs = {'tnt_distribute_dataset': False,
-            'tnt_distribute_validation_dataset': False}
+  kwargs = {'tnt_distribute_dataset': flags_obj.auto_distributed,
+            'tnt_distribute_validation_dataset': flags_obj.auto_distributed}
   history = model.fit(train_dataset,
                       epochs=flags_obj.train_epochs,
                       callbacks=callbacks,
                       validation_data=validation_dataset,
                       validation_freq=flags_obj.epochs_between_evals,
-                      verbose=1,
+                      verbose=0,
                       **kwargs)
   logging.info("Train history: {}".format(history.history))
 
-  kwargs = {'tnt_distribute_dataset': False}
+  kwargs = {'tnt_distribute_dataset': flags_obj.auto_distributed}
   eval_output = model.evaluate(validation_dataset,
-                               verbose=1,
+                               verbose=0,
                                **kwargs)
   
 
