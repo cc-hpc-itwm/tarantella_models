@@ -138,4 +138,23 @@ def define_keras_flags(dynamic_loss_scale=True,
       name='enable_checkpoint_and_export',
       default=False,
       help='Whether to enable a checkpoint callback and export the savedmodel.')
-
+  flags.DEFINE_boolean(
+    name="profile_runtime",
+    default=False,
+    help="Profile runtime"
+  )
+  flags.DEFINE_integer(
+    name="logging_freq",
+    default=100,
+    help="Logging frequency"
+  )
+  flags.DEFINE_boolean(
+    name="auto_distributed",
+    default=True,
+    help="Distribute dataset automatically between ranks"
+  )
+  flags.DEFINE_integer(
+    name="print_freq",
+    default=100,
+    help="Printing frequency"
+  )
