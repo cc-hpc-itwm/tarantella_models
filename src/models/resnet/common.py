@@ -98,8 +98,7 @@ class PiecewiseConstantDecayWithWarmup(
     }
 
 
-def define_keras_flags(dynamic_loss_scale=True,
-                       model=False,
+def define_keras_flags(model=False,
                        optimizer=False,
                        pretrained_filepath=False):
   """Define flags for Keras models."""
@@ -118,7 +117,6 @@ def define_keras_flags(dynamic_loss_scale=True,
       num_packs=False,
       tf_gpu_thread_mode=False,
       datasets_num_private_threads=True,
-      dynamic_loss_scale=False,
       loss_scale=False,
       fp16_implementation=False,
       tf_data_experimental_slack=False,

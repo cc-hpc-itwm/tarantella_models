@@ -4,7 +4,6 @@ import logging
 import os
 
 import tensorflow as tf
-from tensorflow.python.keras.optimizer_v2 import gradient_descent as gradient_descent_v2
 
 import common
 import imagenet_preprocessing
@@ -26,7 +25,7 @@ def get_optimizer(batch_size):
                         boundaries=list(p[1] for p in common.LR_SCHEDULE[1:]),
                         multipliers=list(p[0] for p in common.LR_SCHEDULE),
                         compute_lr_on_cpu=True)
-  optimizer = gradient_descent_v2.SGD(learning_rate=lr_schedule, momentum=0.9)
+  optimizer = tf.keras.optimizers.SGD(learning_rate=lr_schedule, momentum=0.9)
   return optimizer
 
 def main(_):
