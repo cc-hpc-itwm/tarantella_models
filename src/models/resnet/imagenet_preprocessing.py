@@ -61,15 +61,6 @@ def input_fn(is_training,
     filenames = tf_imagenet_preprocessing.get_filenames(is_training, data_dir)
   dataset = tf.data.Dataset.from_tensor_slices(filenames)
 
-  if not auto_distributed:
-    logging.info('Dataset: apply sharding')
-    # shard the dataset
-    dataset.shard(num_shards=comm_size, index=rank)
-
-  if is_training:
-    # Shuffle the input files
-    dataset = dataset.shuffle(buffer_size=tf_imagenet_preprocessing._NUM_TRAIN_FILES)
-
   # Convert to individual records.
   # cycle_length = 10 means that up to 10 files will be read and deserialized in
   # parallel. You may want to increase this number if you have a large number of
@@ -94,6 +85,15 @@ def input_fn(is_training,
   dataset = dataset.map(lambda value: tf_imagenet_preprocessing.parse_record(value, is_training,
                                                                              dtype = tf.float32),
                         num_parallel_calls=tf.data.experimental.AUTOTUNE)
+
+  if not auto_distributed:
+    logging.info('Dataset: apply sharding')
+    # shard the dataset
+    dataset.shard(num_shards=comm_size, index=rank)
+
+  if is_training:
+    # Shuffle the input files
+    dataset = dataset.shuffle(buffer_size=tf_imagenet_preprocessing._NUM_TRAIN_FILES)
 
   dataset = dataset.batch(batch_size, drop_remainder=drop_remainder)
   dataset = dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
