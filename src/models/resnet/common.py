@@ -156,3 +156,8 @@ def define_keras_flags(model=False,
     default=100,
     help="Printing frequency"
   )
+  flags.DEFINE_integer(
+    name="verbose",
+    default=0,
+    help="Verbose during training and validation"
+  )

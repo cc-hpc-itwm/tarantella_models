@@ -91,13 +91,13 @@ def main(_):
                       callbacks=callbacks,
                       validation_data=validation_dataset,
                       validation_freq=flags_obj.epochs_between_evals,
-                      verbose=0,
+                      verbose=flags_obj.verbose,
                       **kwargs)
   logging.info("Train history: {}".format(history.history))
 
   kwargs = {'tnt_distribute_dataset': flags_obj.auto_distributed}
   eval_output = model.evaluate(validation_dataset,
-                               verbose=0,
+                               verbose=flags_obj.verbose,
                                **kwargs)
   
 
