@@ -86,15 +86,16 @@ def input_fn(is_training,
                                                                              dtype = tf.float32),
                         num_parallel_calls=tf.data.experimental.AUTOTUNE)
 
-  if not auto_distributed:
-    logging.info('Dataset: apply sharding')
-    # shard the dataset
-    dataset.shard(num_shards=comm_size, index=rank)
-
   if is_training:
     # Shuffle the input files
     dataset = dataset.shuffle(buffer_size=tf_imagenet_preprocessing._NUM_TRAIN_FILES)
 
   dataset = dataset.batch(batch_size, drop_remainder=drop_remainder)
+
+  if not auto_distributed:
+    logging.info('Dataset: apply sharding')
+    # shard the dataset
+    dataset.shard(num_shards=comm_size, index=rank)
+
   dataset = dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
   return dataset
