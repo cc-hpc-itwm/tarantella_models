@@ -6,13 +6,9 @@ import os
 import tensorflow as tf
 
 import common
-import imagenet_preprocessing
+import dataset_utils
+import resnet32 as resnet_model
 
-# Official Resnet50 model
-try:
-  from official.vision.image_classification.resnet import resnet_model
-except:
-  from official.vision.image_classification import resnet_model
 from utils import RuntimeProfiler
 # Enable Tarantella
 import tarantella as tnt
@@ -20,7 +16,7 @@ import tarantella as tnt
 def get_optimizer(batch_size):
   lr_schedule = common.PiecewiseConstantDecayWithWarmup(
                         batch_size=batch_size,
-                        epoch_size=imagenet_preprocessing.NUM_IMAGES['train'],
+                        epoch_size=45000,
                         warmup_epochs=common.LR_SCHEDULE[0][1],
                         boundaries=list(p[1] for p in common.LR_SCHEDULE[1:]),
                         multipliers=list(p[0] for p in common.LR_SCHEDULE),
@@ -42,25 +38,10 @@ def main(_):
     batch_size = flags_obj.batch_size
 
   # Load and preprocess datasets
-  train_dataset = imagenet_preprocessing.input_fn(is_training=True,
-                                                  data_dir=flags_obj.data_dir,
-                                                  batch_size=batch_size,
-                                                  shuffle_seed = 42,
-                                                  drop_remainder=True,
-                                                  rank=rank,
-                                                  comm_size= comm_size,
-                                                  auto_distributed=flags_obj.auto_distributed)
-  validation_dataset = imagenet_preprocessing.input_fn(is_training=False,
-                                                       data_dir=flags_obj.data_dir,
-                                                       batch_size=batch_size,
-                                                       shuffle_seed = 42,
-                                                       drop_remainder=True,
-                                                       rank=rank,
-                                                       comm_size=comm_size,
-                                                       auto_distributed=flags_obj.auto_distributed)
+  (train_dataset, validation_dataset, _) = dataset_utils.get_tnt_cifar10_dataset(45000, 5000, 10000, batch_size)
 
   # Create model and wrap it into a Tarantella model
-  model = resnet_model.resnet50(num_classes=imagenet_preprocessing.NUM_CLASSES)
+  model = resnet_model.resnet32(num_classes=10)
   model = tnt.Model(model)
 
   optimizer = get_optimizer(flags_obj.batch_size)
