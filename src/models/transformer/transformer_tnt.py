@@ -140,13 +140,15 @@ class TransformerTntTask(object):
     if self.flags_obj.enable_tensorboard and self.flags_obj.model_dir:
       callbacks.append(tf.keras.callbacks.TensorBoard(log_dir=self.flags_obj.model_dir))
 
-    # enable logging callbacks only on a specific rank
-    if tnt.is_master_rank():
-      if self.flags_obj.enable_time_history:
-        time_callback = keras_utils.TimeHistory(self.params["batch_size"],
-                                                self.params["num_sentences"],
-                                                logdir = None)
-        callbacks.append(time_callback)
+    # enable logging callbacks only on the master rank
+    if self.flags_obj.enable_time_history:
+      time_callback = keras_utils.TimeHistory(self.params["batch_size"],
+                                              self.params["num_sentences"],
+                                              logdir = None)
+      tnt_time_callback = tnt.keras.callbacks.Callback(time_callback,
+                                                       aggregate_logs = False,
+                                                       run_on_all_ranks = False)
+      callbacks.append(tnt_time_callback)
 
     # print messages only once
     if tnt.is_master_rank():
