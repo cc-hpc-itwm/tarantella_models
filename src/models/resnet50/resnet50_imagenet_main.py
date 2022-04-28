@@ -4,14 +4,12 @@ import datetime
 
 from models.resnet50 import imagenet_preprocessing
 from models.resnet50 import resnet_model
-from models.utils import keras_utils as utils
+from models.resnet50 import lr_scheduler
 
-import train_loop
 import tensorflow as tf
-from tensorflow.python.keras.optimizer_v2 import gradient_descent as gradient_descent_v2
 
 SHUFFLE_BUFFER = 6400 # nranks_per_node * 64 * imagesize * number batches < available memory
-PREPROCESS_CYCLE_LENGTH = 16
+PREPROCESS_CYCLE_LENGTH = 8
 PREPROCESS_NUM_THREADS = tf.data.experimental.AUTOTUNE
 PREFETCH_NBATCHES = tf.data.AUTOTUNE  # should be ~ the number of devices
 
@@ -44,6 +42,7 @@ def parse_args():
   parser.add_argument("-s", "--strategy", type=str, default="data")
   parser.add_argument("--num_pipeline_stages", type=int, default=2)
   parser.add_argument("--num_partitions", type=int, default=2)
+  parser.add_argument("--synthetic_data", type=bool, default = False)
 
   args = parser.parse_args()
   if args.data_dir == None or not os.path.isdir(args.data_dir):
@@ -55,6 +54,24 @@ args = parse_args()
 if not args.without_datapar:
   import tarantella as tnt
 
+def load_synthetic_dataset(dataset_type,
+                           batch_size,
+                           dtype=tf.float32,
+                           drop_remainder=False):
+  images = tf.zeros(shape = (imagenet_preprocessing.DEFAULT_IMAGE_SIZE,
+                             imagenet_preprocessing.DEFAULT_IMAGE_SIZE,
+                             imagenet_preprocessing.NUM_CHANNELS),
+                    dtype = dtype)
+  labels = tf.zeros(shape = (), dtype = tf.int32)
+
+  if dataset_type in ["train"]:
+    dataset_size = imagenet_preprocessing.NUM_IMAGES['train'] // 100
+  else:
+    dataset_size = imagenet_preprocessing.NUM_IMAGES['validation'] // 100
+  dataset = tf.data.Dataset.from_tensors((images, labels)).repeat(dataset_size)
+  dataset = dataset.batch(batch_size, drop_remainder = drop_remainder)
+  dataset = dataset.prefetch(buffer_size=PREFETCH_NBATCHES)
+  return dataset
 
 def load_dataset(dataset_type,
                  data_dir,
@@ -77,35 +94,37 @@ def load_dataset(dataset_type,
                                cycle_length=PREPROCESS_CYCLE_LENGTH,
                                num_parallel_calls=PREPROCESS_NUM_THREADS,
                                deterministic = False)
-  #dataset = dataset.take(195*batch_size) # for 10 input files
-  #dataset = dataset.cache()
 
   # Parses the raw records into images and labels.
   dataset = dataset.map(lambda value: imagenet_preprocessing.parse_record(value, is_training, dtype),
                         num_parallel_calls=PREPROCESS_NUM_THREADS,
                         deterministic = False)
-#  dataset = dataset.cache()
-  dataset.prefetch(buffer_size=SHUFFLE_BUFFER)
+
   if is_training:
     dataset = dataset.shuffle(buffer_size=SHUFFLE_BUFFER,
                               seed=shuffle_seed)
   dataset = dataset.batch(batch_size, drop_remainder=drop_remainder)
-  
   dataset = dataset.prefetch(buffer_size=PREFETCH_NBATCHES)
   return dataset
 
-def load_data(data_dir, batch_size, shuffle_seed = None):
-  train_input_dataset = load_dataset(dataset_type='train', data_dir=data_dir,
-                                     batch_size=batch_size, dtype=tf.float32,
-                                     drop_remainder=True, shuffle_seed=shuffle_seed)
-  val_input_dataset = load_dataset(dataset_type='validation', data_dir=data_dir,
-                                   batch_size=batch_size, dtype=tf.float32,
-                                   drop_remainder=True)
+def load_data(data_dir, batch_size, shuffle_seed = None, synthetic_data = False):
+  if synthetic_data:
+    train_input_dataset = load_synthetic_dataset(dataset_type='train', batch_size=batch_size,
+                                                 dtype=tf.float32, drop_remainder=True)
+    val_input_dataset = load_synthetic_dataset(dataset_type='validation', batch_size=batch_size,
+                                               dtype=tf.float32, drop_remainder=True)
+  else:
+    train_input_dataset = load_dataset(dataset_type='train', data_dir=data_dir,
+                                      batch_size=batch_size, dtype=tf.float32,
+                                      drop_remainder=True, shuffle_seed=shuffle_seed)
+    val_input_dataset = load_dataset(dataset_type='validation', data_dir=data_dir,
+                                    batch_size=batch_size, dtype=tf.float32,
+                                    drop_remainder=True)
   return {"train" : train_input_dataset,
           "validation" : val_input_dataset }
 
 def get_reference_compile_params():
-  return {'optimizer' : tf.keras.optimizers.SGD(lr=train_loop.BASE_LEARNING_RATE, momentum=0.9),
+  return {'optimizer' : tf.keras.optimizers.SGD(lr=lr_scheduler.BASE_LEARNING_RATE, momentum=0.9),
           'loss' : tf.keras.losses.SparseCategoricalCrossentropy(),
           'metrics' : [tf.keras.metrics.SparseCategoricalAccuracy()]}
 
@@ -121,7 +140,6 @@ if __name__ == '__main__':
     rank = tnt.get_rank()
     comm_size = tnt.get_size()
 
-
     strategy = tnt.ParallelStrategy.PIPELINING
     if args.strategy == "data":
       strategy = tnt.ParallelStrategy.DATA
@@ -130,8 +148,8 @@ if __name__ == '__main__':
 
 
   callbacks = []
-  callbacks.append(train_loop.LearningRateBatchScheduler(
-                            train_loop.learning_rate_schedule,
+  callbacks.append(lr_scheduler.LearningRateBatchScheduler(
+                            lr_scheduler.learning_rate_schedule,
                             batch_size = args.batch_size,
                             num_images = imagenet_preprocessing.NUM_IMAGES['train']))
   if args.profile_dir:
@@ -143,27 +161,21 @@ if __name__ == '__main__':
                                                     profile_batch=(10,20),
                                                     histogram_freq=0))
 
-  if rank == 0 and args.profile_runtimes:
-    callbacks += [utils.RuntimeProfiler(batch_size = args.batch_size,
-                                        logging_freq = args.logging_freq,
-                                        print_freq = args.print_freq) ]
-
   model = resnet_model.resnet50(num_classes=imagenet_preprocessing.NUM_CLASSES,
                                 num_partitions=args.num_partitions) # add split layers
   if have_datapar:
     model = tnt.Model(model,
-                             parallel_strategy = strategy,
-                             num_pipeline_stages = args.num_pipeline_stages)
+                      parallel_strategy = strategy,
+                      num_pipeline_stages = args.num_pipeline_stages)
 
-  datasets = load_data(args.data_dir, batch_size = args.batch_size, shuffle_seed = args.shuffle_seed)
+  datasets = load_data(args.data_dir, batch_size = args.batch_size,
+                       shuffle_seed = args.shuffle_seed,
+                       synthetic_data=args.synthetic_data)
   model.compile(**get_reference_compile_params())
 
   history = model.fit(datasets['train'],
                       validation_data = datasets['validation'],
+                      validation_freq=args.val_freq,
                       epochs=args.train_epochs,
                       callbacks=callbacks,
                       verbose=1)
-  # eval_output = model.evaluate(datasets['validation'],
-  #                             verbose=2)
-  # if tnt.is_master_rank():
-  #   print(f"Eval output = {eval_output}")
