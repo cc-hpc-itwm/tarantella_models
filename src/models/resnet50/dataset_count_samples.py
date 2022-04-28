@@ -1,11 +1,7 @@
-import argparse
-import os
-import datetime 
 import numpy as np
 import time
 
 from models.resnet50 import imagenet_preprocessing
-from models.utils import keras_utils as utils
 
 import tarantella as tnt
 import tensorflow as tf
@@ -40,9 +36,9 @@ dataset = dataset.interleave(tf.data.TFRecordDataset,
 #dataset = dataset.cache()
 
 # Parses the raw records into images and labels.
-dataset = dataset.map(lambda value: imagenet_preprocessing.parse_record(value, is_training, dtype),
-                      num_parallel_calls=PREPROCESS_NUM_THREADS,
-                      deterministic = False)
+# dataset = dataset.map(lambda value: imagenet_preprocessing.parse_record(value, is_training, dtype),
+#                       num_parallel_calls=PREPROCESS_NUM_THREADS,
+#                       deterministic = False)
 dataset = dataset.batch(batch_size = 64, drop_remainder=True)
 dataset = dataset.prefetch(buffer_size=1)
   
@@ -56,10 +52,41 @@ t = time.time()
 tnt_dataset.distribute_dataset_across_ranks(apply_batch = True)
 t = time.time() - t
 
-
 samples_time = time.time()
 n = tnt_dataset.num_samples
 samples_time = time.time() - samples_time
+
+
+dataset = dataset.batch(batch_size = 64, drop_remainder=True)
+dataset = dataset.prefetch(buffer_size=1)
+
+tnt_dataset = tnt.data.Dataset(dataset = dataset,
+                               num_ranks = 1,
+                               rank = 0)
+
+def func(i):
+    i = i.numpy() # Decoding from the EagerTensor object
+    x, y = lambda value: imagenet_preprocessing.parse_record(value, is_training, dtype)(training_set[i])
+    return x, y
+
+z = list(range(n))
+idataset = tf.data.Dataset.from_generator(lambda: z, tf.uint32)
+
+idataset = idataset.shuffle(buffer_size=len(z), seed=0,
+                          reshuffle_each_iteration=True)
+new_dataset = idataset.map(lambda i: tf.py_function(func=func,
+                                               inp=[i],
+                                               Tout=[tf.uint32,
+                                                     tf.float32]
+                                               ),
+                      num_parallel_calls=tf.data.AUTOTUNE)
+
+dataset = dataset.batch(batch_size = 64, drop_remainder=True)
+dataset = dataset.prefetch(buffer_size=1)
+
+tnt_dataset = tnt.data.Dataset(dataset = dataset,
+                               num_ranks = 1,
+                               rank = 0)
 
 alltime = time.time() - alltime
 print(f"num_samples={n} time={t} samples_time={samples_time} alltime={alltime}")
