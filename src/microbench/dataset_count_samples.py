@@ -41,7 +41,7 @@ dataset = dataset.interleave(tf.data.TFRecordDataset,
 #                       deterministic = False)
 dataset = dataset.batch(batch_size = 64, drop_remainder=True)
 dataset = dataset.prefetch(buffer_size=1)
-  
+
 tnt_dataset = tnt.data.Dataset(dataset = dataset,
                                num_ranks = 1,
                                rank = 0)
@@ -90,3 +90,4 @@ tnt_dataset = tnt.data.Dataset(dataset = dataset,
 
 alltime = time.time() - alltime
 print(f"num_samples={n} time={t} samples_time={samples_time} alltime={alltime}")
+
