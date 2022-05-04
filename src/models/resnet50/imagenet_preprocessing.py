@@ -36,7 +36,6 @@ from __future__ import division
 from __future__ import print_function
 
 import os
-from absl import logging
 import tensorflow as tf
 
 #===============================================================================
@@ -49,7 +48,7 @@ NUM_IMAGES = {
     'validation': 50000,
 }
 
-_NUM_TRAIN_FILES = 1000 #024
+_NUM_TRAIN_FILES = 1024
 _NUM_VAL_FILES = 128
 
 

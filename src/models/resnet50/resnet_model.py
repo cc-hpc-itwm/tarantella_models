@@ -27,14 +27,17 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-from tensorflow.python.keras import backend
-from tensorflow.python.keras import initializers
-from tensorflow.python.keras import layers
-from tensorflow.python.keras import models
-from tensorflow.python.keras import regularizers
+from tensorflow.keras import backend
+from tensorflow.keras import initializers
+from tensorflow.keras import layers
+from tensorflow.keras import models
+from tensorflow.keras import regularizers
 
 import tensorflow as tf
-import tarantella as tnt
+try:
+  import tarantella as tnt
+except:
+  pass
 
 L2_WEIGHT_DECAY = 1e-4
 BATCH_NORM_DECAY = 0.9
