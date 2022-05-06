@@ -16,6 +16,18 @@ PREFETCH_NBATCHES = tf.data.AUTOTUNE  # should be ~ the number of devices
 
 #tf.config.threading.set_inter_op_parallelism_threads(8)
 
+cnn_models = {'resnet50': tf.keras.applications.resnet50.ResNet50,
+              'resnet101': tf.keras.applications.resnet.ResNet101,
+              'resnet152': tf.keras.applications.resnet.ResNet152,
+              'efficientnetV2B0': tf.keras.applications.efficientnet_v2.EfficientNetV2B0,
+              'efficientnetV2B1': tf.keras.applications.efficientnet_v2.EfficientNetV2B1,
+              'efficientnetV2B2': tf.keras.applications.efficientnet_v2.EfficientNetV2B2,
+              'efficientnetV2B3': tf.keras.applications.efficientnet_v2.EfficientNetV2B3,
+              'efficientnetV2S': tf.keras.applications.efficientnet_v2.EfficientNetV2S,
+              'efficientnetV2M': tf.keras.applications.efficientnet_v2.EfficientNetV2M,
+              'efficientnetV2L': tf.keras.applications.efficientnet_v2.EfficientNetV2L,
+              }
+
 def add_bool_arg(parser, name, default=False):
   group = parser.add_mutually_exclusive_group(required=False)
   group.add_argument('--' + name, dest=name, action='store_true')
@@ -40,6 +52,8 @@ def parse_args():
   parser.add_argument("--num_pipeline_stages", type=int, default=1)
   parser.add_argument("--num_partitions", type=int, default=1)
   parser.add_argument("--verbose", type=int, default = 2)
+  parser.add_argument("--model_arch", type=str, default="resnet50",
+                      help = f"Choose one of: {list(cnn_models.keys())}")
 
   add_bool_arg(parser, "distribute", default = True)
   add_bool_arg(parser, "profile_runtimes", default = False)
@@ -48,7 +62,9 @@ def parse_args():
 
   args = parser.parse_args()
   if not args.synthetic_data and (args.data_dir == None or not os.path.isdir(args.data_dir)):
-   sys.exit("ERROR: Cannot find images directory %s" % args.data_dir)
+   sys.exit(f"ERROR: Cannot find images directory {args.data_dir}")
+  if not args.model_arch in list(cnn_models.keys()):
+    sys.exit(f"ERROR: Model `{args.model_arch}` not supported (choose one of: {list(cnn_models.keys())})")
   return args  
 
 args = parse_args()
@@ -148,8 +164,15 @@ if __name__ == '__main__':
                                                     profile_batch=(10,20),
                                                     histogram_freq=0))
 
-  model = resnet_model.resnet50(num_classes=imagenet_preprocessing.NUM_CLASSES,
-                                num_partitions=args.num_partitions) # add split layers
+  model_arch = cnn_models[args.model_arch]
+  model = model_arch(include_top=True,
+                     weights=None,
+                     classes=1000,
+                     input_shape=(224, 224, 3),
+                     input_tensor=None,
+                     pooling=None,
+                     classifier_activation='softmax')
+
   if args.distribute:
     model = tnt.Model(model,
                       parallel_strategy = strategy,
@@ -164,3 +187,4 @@ if __name__ == '__main__':
                       epochs=args.train_epochs,
                       callbacks=callbacks,
                       verbose=args.verbose)
+
