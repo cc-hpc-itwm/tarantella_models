@@ -4,7 +4,6 @@ import datetime
 import sys
 
 from models.resnet50 import imagenet_preprocessing
-from models.resnet50 import resnet_model
 from models.resnet50 import lr_scheduler
 
 import tensorflow as tf
