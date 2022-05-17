@@ -3,8 +3,9 @@ import os
 import datetime
 import sys
 
-from models.resnet50 import imagenet_preprocessing
-from models.resnet50 import lr_scheduler
+from models.image_classification import imagenet_preprocessing
+from models.image_classification import lr_scheduler
+from models import utils
 
 import tensorflow as tf
 
@@ -40,22 +41,24 @@ def parse_args():
   parser.add_argument("--train_epochs", type=int, default=90)
   parser.add_argument("--train_num_samples", type=int, default=imagenet_preprocessing.NUM_IMAGES['train'])
   parser.add_argument("--val_num_samples", type=int, default=imagenet_preprocessing.NUM_IMAGES['validation'])
+  parser.add_argument("--shuffle_seed", type = int, default = 42)
+  parser.add_argument("--val_freq", type=int, default = 1)
+  parser.add_argument("--verbose", type=int, default = 2)
+
   parser.add_argument("--profile_dir", help="directory for profiles")
   parser.add_argument("--logging_freq", help="how often (in number of iterations) to record the runtimes per iteration",
                       type=int, default = 10)
   parser.add_argument("--print_freq", help="how often (in number of iterations) to print the recorded iteration runtimes",
                       type=int, default = 30)
-  parser.add_argument("--shuffle_seed", type = int, default = 42)
-  parser.add_argument("--val_freq", type=int, default = 1)
+  add_bool_arg(parser, "profile_runtimes", default = False)
+
+  add_bool_arg(parser, "distribute", default = True)
+  parser.add_argument("--model_arch", type=str, default="resnet50",
+                      help = f"Choose one of: {list(cnn_models.keys())}")
   parser.add_argument("--strategy", type=str, default="data")
   parser.add_argument("--num_pipeline_stages", type=int, default=1)
   parser.add_argument("--num_partitions", type=int, default=1)
-  parser.add_argument("--verbose", type=int, default = 2)
-  parser.add_argument("--model_arch", type=str, default="resnet50",
-                      help = f"Choose one of: {list(cnn_models.keys())}")
 
-  add_bool_arg(parser, "distribute", default = True)
-  add_bool_arg(parser, "profile_runtimes", default = False)
   add_bool_arg(parser, "synthetic_data", default = False)
   add_bool_arg(parser, "drop_remainder", default = False)
 
@@ -162,6 +165,14 @@ if __name__ == '__main__':
                                                     update_freq = 'batch',
                                                     profile_batch=(10,20),
                                                     histogram_freq=0))
+
+  if args.profile_runtimes:
+    profiler_callback = utils.RuntimeProfiler(batch_size = args.batch_size,
+                                              logging_freq = args.logging_freq,
+                                              print_freq = args.print_freq)
+    callbacks.append(tnt.keras.callbacks.Callback(profiler_callback,
+                                                  run_on_all_ranks = False,
+                                                  aggregate_logs = False))
 
   model_arch = cnn_models[args.model_arch]
   model = model_arch(include_top=True,
