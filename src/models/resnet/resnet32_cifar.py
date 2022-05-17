@@ -9,7 +9,7 @@ import common
 import dataset_utils
 import resnet32 as resnet_model
 
-from utils import RuntimeProfiler
+from models.utils import RuntimeProfiler
 # Enable Tarantella
 import tarantella as tnt
 
