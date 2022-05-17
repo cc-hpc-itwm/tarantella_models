@@ -13,7 +13,7 @@ try:
   from official.vision.image_classification.resnet import resnet_model
 except:
   from official.vision.image_classification import resnet_model
-from utils import RuntimeProfiler
+from models.utils import RuntimeProfiler
 
 def get_optimizer(batch_size):
   lr_schedule = common.PiecewiseConstantDecayWithWarmup(
