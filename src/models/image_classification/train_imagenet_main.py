@@ -170,9 +170,12 @@ if __name__ == '__main__':
     profiler_callback = utils.RuntimeProfiler(batch_size = args.batch_size,
                                               logging_freq = args.logging_freq,
                                               print_freq = args.print_freq)
-    callbacks.append(tnt.keras.callbacks.Callback(profiler_callback,
-                                                  run_on_all_ranks = False,
-                                                  aggregate_logs = False))
+    if args.distribute:
+      profiler_callback = tnt.keras.callbacks.Callback(profiler_callback,
+                                                       run_on_all_ranks = False,
+                                                       aggregate_logs = False)
+    callbacks.append(profiler_callback)
+
 
   model_arch = cnn_models[args.model_arch]
   model = model_arch(include_top=True,
