@@ -78,3 +78,31 @@ def learning_rate_schedule(current_epoch,
     else:
       break
   return learning_rate
+
+
+class ExpDecayWithWarmupSchedule(tf.keras.optimizers.schedules.ExponentialDecay):
+  def __init__(self, base_learning_rate, num_ranks,
+               decay_steps, decay_rate, staircase,
+               warmup_steps, warmup_rate):
+    # scale learning rate by the number of ranks
+    initial_learning_rate = base_learning_rate * num_ranks
+
+    self.warmup_rate = warmup_rate
+    self.warmup_steps = warmup_steps
+    super().__init__(initial_learning_rate, decay_steps, decay_rate, staircase)
+
+  def __call__(self, step):
+    def warmup():
+      # Learning rate increases linearly per step.
+      multiplier = self.warmup_rate * (step / self.warmup_steps)
+      return tf.multiply(self.initial_learning_rate, multiplier)
+
+    def exp_decay():
+      return super(ExpDecayWithWarmupSchedule, self).__call__(step)
+
+    return tf.cond(tf.math.less_equal(step, self.warmup_steps),
+                    true_fn = warmup,
+                    false_fn = exp_decay)
+
+
+
