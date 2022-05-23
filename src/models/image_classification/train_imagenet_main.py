@@ -126,11 +126,13 @@ def load_data(args):
     train_input_dataset = load_dataset(dataset_type='train',
                                        data_dir=args.data_dir, num_samples = args.train_num_samples,
                                        batch_size=args.batch_size, dtype=tf.float32,
-                                       drop_remainder=args.drop_remainder, shuffle_seed=args.shuffle_seed)
+                                       drop_remainder=args.drop_remainder,
+                                       shuffle_seed=args.shuffle_seed)
     val_input_dataset = load_dataset(dataset_type='validation',
                                      data_dir=args.data_dir, num_samples = args.val_num_samples,
                                      batch_size=args.batch_size, dtype=tf.float32,
-                                     drop_remainder=args.drop_remainder)
+                                     drop_remainder=args.drop_remainder,
+                                     shuffle_seed=args.shuffle_seed)
   return train_input_dataset, val_input_dataset
 
 def get_reference_compile_params(num_ranks, num_samples, batch_size):
