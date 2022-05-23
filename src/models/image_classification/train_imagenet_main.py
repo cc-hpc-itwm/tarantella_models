@@ -108,7 +108,7 @@ def load_dataset(dataset_type, data_dir, batch_size, num_samples,
                         num_parallel_calls=PREPROCESS_NUM_THREADS,
                         deterministic = False)
   if is_training:
-    dataset = dataset.shuffle(buffer_size=SHUFFLE_BUFFER,
+    dataset = dataset.shuffle(buffer_size=min(batch_size, 64*64),
                               seed=shuffle_seed)
   dataset = dataset.batch(batch_size, drop_remainder=drop_remainder)
   dataset = dataset.prefetch(buffer_size=PREFETCH_NBATCHES)
@@ -133,18 +133,27 @@ def load_data(args):
                                      drop_remainder=args.drop_remainder)
   return train_input_dataset, val_input_dataset
 
-def get_reference_compile_params():
-  return {'optimizer' : tf.keras.optimizers.SGD(learning_rate=lr_scheduler.BASE_LEARNING_RATE,
+def get_reference_compile_params(num_ranks, num_samples, batch_size):
+  num_steps_per_epoch = num_samples // batch_size
+  lr_schedule = lr_scheduler.ExpDecayWithWarmupSchedule(
+                            base_learning_rate=0.1,
+                            num_ranks=num_ranks,
+                            decay_steps=2.4 * num_steps_per_epoch,
+                            decay_rate=0.97,
+                            staircase=False,
+                            warmup_steps=5 * num_steps_per_epoch,
+                            warmup_rate=1.0)
+  return {'optimizer' : tf.keras.optimizers.SGD(learning_rate=lr_schedule,
                                                 momentum=0.9),
           'loss' : tf.keras.losses.SparseCategoricalCrossentropy(),
           'metrics' : [tf.keras.metrics.SparseCategoricalAccuracy()]}
 
 if __name__ == '__main__':
   rank = 0
-  comm_size = 1
+  num_ranks = 1
   if args.distribute:
     rank = tnt.get_rank()
-    comm_size = tnt.get_size()
+    num_ranks = tnt.get_size()
 
     strategy = tnt.ParallelStrategy.PIPELINING
     if args.strategy == "data":
@@ -153,10 +162,6 @@ if __name__ == '__main__':
       strategy = tnt.ParallelStrategy.ALL
 
   callbacks = []
-  callbacks.append(lr_scheduler.LearningRateBatchScheduler(
-                            lr_scheduler.learning_rate_schedule,
-                            batch_size = args.batch_size,
-                            num_images = imagenet_preprocessing.NUM_IMAGES['train']))
   if args.profile_dir:
     # Start the training w/ logging
     log_dir = os.path.join(args.profile_dir, "tnt-" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S"))
@@ -192,7 +197,9 @@ if __name__ == '__main__':
                       num_pipeline_stages = args.num_pipeline_stages)
 
   train_dataset, val_dataset = load_data(args)
-  model.compile(**get_reference_compile_params())
+  model.compile(**get_reference_compile_params(num_ranks=num_ranks,
+                                               num_samples = args.train_num_samples,
+                                               batch_size=args.batch_size))
 
   history = model.fit(train_dataset,
                       validation_data = val_dataset,
