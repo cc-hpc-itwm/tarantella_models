@@ -53,7 +53,7 @@ import os
 from absl import logging
 import tensorflow as tf
 
-from official.nlp.transformer import data_pipeline
+from official.legacy.transformer import data_pipeline
 from official.utils.misc import model_helpers
 
 # Buffer size for reading records from a TFRecord file. Each training file is

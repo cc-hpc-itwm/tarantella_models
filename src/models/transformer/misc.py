@@ -1,16 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
-# pylint: disable=g-bad-import-order
-
 from absl import flags
-import tensorflow as tf
 
-from official.nlp.transformer import model_params
-from official.nlp.transformer import misc
+from official.legacy.transformer import model_params
 from official.utils.flags import core as flags_core
-from official.utils.misc import keras_utils
 
 FLAGS = flags.FLAGS
 

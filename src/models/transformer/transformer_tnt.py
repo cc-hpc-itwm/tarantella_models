@@ -22,33 +22,29 @@ from __future__ import division
 from __future__ import print_function
 
 import logging
-import os
-import tempfile
+
 # Import libraries
 from absl import app
 from absl import flags
 import tensorflow as tf
 
-import layer_helpers.einsum_dense 
-import layer_helpers.multi_head_attention
+#import layer_helpers.einsum_dense 
+#import layer_helpers.multi_head_attention
 
-tf.keras.layers.experimental.EinsumDense = layer_helpers.einsum_dense.EinsumDense
-tf.keras.layers.MultiHeadAttention = layer_helpers.multi_head_attention.MultiHeadAttention
+#tf.keras.layers.experimental.EinsumDense = layer_helpers.einsum_dense.EinsumDense
+#tf.keras.layers.MultiHeadAttention = layer_helpers.multi_head_attention.MultiHeadAttention
 
-from official.nlp.transformer import metrics
-from official.nlp.transformer import misc
-from official.nlp.transformer import optimizer
-from official.nlp.transformer import transformer
-from official.nlp.transformer import transformer_main
-from official.nlp.transformer.utils import tokenizer
-from official.utils.flags import core as flags_core
+from official.legacy.transformer import metrics
+from official.legacy.transformer import misc
+from official.legacy.transformer import optimizer
+from official.legacy.transformer import transformer
+from official.legacy.transformer import transformer_main
 from official.utils.misc import keras_utils
 
 import data_pipeline
 import misc as tnt_misc
 
 import tarantella as tnt
-tnt.init()
   
 def create_model(internal_model, params, is_train):
   """Creates transformer model."""
@@ -108,12 +104,13 @@ class TransformerTntTask(object):
 
     # Transformer model used both as Tarantella model (in training) and as a serial
     # model for inference
-    internal_model = transformer.Transformer(self.params, name="transformer_v2")
+    internal_model = transformer.Transformer(self.params, name="transformer")
 
     # The train model includes an additional logits layer and a customized loss
     self.train_model = create_model(internal_model, self.params, is_train = True)
     # Enable distributed training
-    self.train_model = tnt.Model(self.train_model)
+    self.train_model = tnt.Model(self.train_model,
+                                 parallel_strategy = tnt.ParallelStrategy.DATA)
 
     # The inference model is wrapped as a different Keras model that does not use labels
     self.predict_model = create_model(internal_model, self.params, is_train = False)
