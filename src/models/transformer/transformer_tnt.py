@@ -164,7 +164,6 @@ class TransformerTntTask(object):
 
       if tnt.is_master_rank():
         logging.info("Train history: {}".format(history.history))
-        stats = misc.build_stats(history, callbacks)
 
       if tnt.is_master_rank():
         eval_stats = self.eval()
