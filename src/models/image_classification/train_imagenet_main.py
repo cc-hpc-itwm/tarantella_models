@@ -1,4 +1,5 @@
 import argparse
+import enum
 import os
 import datetime
 import sys
@@ -8,6 +9,7 @@ from models.image_classification import lr_scheduler
 from models import utils
 
 import tensorflow as tf
+import tf_multiworker_distribution as tf_dist
 
 SHUFFLE_BUFFER = 6400 # nranks_per_node * 64 * imagesize * number batches < available memory
 PREPROCESS_CYCLE_LENGTH = 8
@@ -27,6 +29,15 @@ cnn_models = {'resnet50': tf.keras.applications.resnet50.ResNet50,
               'efficientnetV2M': tf.keras.applications.efficientnet_v2.EfficientNetV2M,
               'efficientnetV2L': tf.keras.applications.efficientnet_v2.EfficientNetV2L,
               }
+class ParallelMethods(str, enum.Enum):
+  TNT = "tnt"
+  TF = "tf"
+  NONE = None
+
+def equals(self, string):
+  return self.value == string
+
+
 
 def add_bool_arg(parser, name, default=False):
   group = parser.add_mutually_exclusive_group(required=False)
@@ -52,7 +63,8 @@ def parse_args():
                       type=int, default = 30)
   add_bool_arg(parser, "profile_runtimes", default = False)
 
-  add_bool_arg(parser, "distribute", default = True)
+  parser.add_argument("--distribute", type=str, default="tnt",
+                      help = f"Choose one of: {[m.value for m in ParallelMethods]}")
   parser.add_argument("--model_arch", type=str, default="resnet50",
                       help = f"Choose one of: {list(cnn_models.keys())}")
   parser.add_argument("--strategy", type=str, default="data")
@@ -71,8 +83,28 @@ def parse_args():
 
 args = parse_args()
 
-if args.distribute:
+rank = 0
+num_ranks = 1
+if args.distribute == ParallelMethods.TNT:
   import tarantella as tnt
+
+  rank = tnt.get_rank()
+  num_ranks = tnt.get_size()
+
+  strategy = tnt.ParallelStrategy.PIPELINING
+  if args.strategy == "data":
+    strategy = tnt.ParallelStrategy.DATA
+  elif args.strategy == "all":
+    strategy = tnt.ParallelStrategy.ALL
+
+elif args.distribute == ParallelMethods.TF:
+  nodesfile = os.environ['MACHINE_FILE_NAME']
+  rank = int(os.environ['GASPI_RANK'])
+  nnp = int(os.environ['NNP'])
+  num_ranks = tf_dist.tf_get_num_ranks(nodesfile, nnp)
+  strategy = tf_dist.tf_init_multiworker_strategy(nodesfile, rank, nnp)
+
+
 
 def load_synthetic_dataset(batch_size, num_samples, dtype, drop_remainder):
   images = tf.zeros(shape = (imagenet_preprocessing.DEFAULT_IMAGE_SIZE,
@@ -151,18 +183,6 @@ def get_reference_compile_params(num_ranks, num_samples, batch_size):
           'metrics' : [tf.keras.metrics.SparseCategoricalAccuracy()]}
 
 if __name__ == '__main__':
-  rank = 0
-  num_ranks = 1
-  if args.distribute:
-    rank = tnt.get_rank()
-    num_ranks = tnt.get_size()
-
-    strategy = tnt.ParallelStrategy.PIPELINING
-    if args.strategy == "data":
-      strategy = tnt.ParallelStrategy.DATA
-    elif args.strategy == "all":
-      strategy = tnt.ParallelStrategy.ALL
-
   callbacks = []
   if args.profile_dir:
     # Start the training w/ logging
@@ -177,32 +197,49 @@ if __name__ == '__main__':
     profiler_callback = utils.RuntimeProfiler(batch_size = args.batch_size,
                                               logging_freq = args.logging_freq,
                                               print_freq = args.print_freq)
-    if args.distribute:
+    if args.distribute == ParallelMethods.TNT:
       profiler_callback = tnt.keras.callbacks.Callback(profiler_callback,
                                                        run_on_all_ranks = False,
                                                        aggregate_logs = False)
-    callbacks.append(profiler_callback)
-
+      callbacks.append(profiler_callback)
+    elif args.distribute == ParallelMethods.TF:
+      if rank == 0:
+        callbacks.append(profiler_callback)
+    else:
+      callbacks.append(profiler_callback)
 
   model_arch = cnn_models[args.model_arch]
-  model = model_arch(include_top=True,
-                     weights=None,
-                     classes=1000,
-                     input_shape=(224, 224, 3),
-                     input_tensor=None,
-                     pooling=None,
-                     classifier_activation='softmax')
 
-  if args.distribute:
-    model = tnt.Model(model,
-                      parallel_strategy = strategy,
-                      num_pipeline_stages = args.num_pipeline_stages)
+  if args.distribute == ParallelMethods.TF:
+    with strategy.scope():
+      model = model_arch(include_top=True,
+                         weights=None,
+                         classes=1000,
+                         input_shape=(224, 224, 3),
+                         input_tensor=None,
+                         pooling=None,
+                         classifier_activation='softmax')
+      model.compile(**get_reference_compile_params(num_ranks=num_ranks,
+                                                   num_samples = args.train_num_samples,
+                                                   batch_size=args.batch_size))
+  else:
+    model = model_arch(include_top=True,
+                       weights=None,
+                       classes=1000,
+                       input_shape=(224, 224, 3),
+                       input_tensor=None,
+                       pooling=None,
+                       classifier_activation='softmax')
+
+    if args.distribute == ParallelMethods.TNT:
+      model = tnt.Model(model,
+                        parallel_strategy = strategy,
+                        num_pipeline_stages = args.num_pipeline_stages)
+    model.compile(**get_reference_compile_params(num_ranks=num_ranks,
+                                                 num_samples = args.train_num_samples,
+                                                 batch_size=args.batch_size))
 
   train_dataset, val_dataset = load_data(args)
-  model.compile(**get_reference_compile_params(num_ranks=num_ranks,
-                                               num_samples = args.train_num_samples,
-                                               batch_size=args.batch_size))
-
   history = model.fit(train_dataset,
                       validation_data = val_dataset,
                       validation_freq=args.val_freq,
