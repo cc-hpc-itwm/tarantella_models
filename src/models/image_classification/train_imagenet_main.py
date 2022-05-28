@@ -29,10 +29,15 @@ cnn_models = {'resnet50': tf.keras.applications.resnet50.ResNet50,
               'efficientnetV2M': tf.keras.applications.efficientnet_v2.EfficientNetV2M,
               'efficientnetV2L': tf.keras.applications.efficientnet_v2.EfficientNetV2L,
               }
-class ParallelMethods(enum.Enum):
+class ParallelMethods(str, enum.Enum):
   TNT = "tnt"
   TF = "tf"
   NONE = None
+
+def equals(self, string):
+  return self.value == string
+
+
 
 def add_bool_arg(parser, name, default=False):
   group = parser.add_mutually_exclusive_group(required=False)
@@ -95,10 +100,9 @@ if args.distribute == ParallelMethods.TNT:
 elif args.distribute == ParallelMethods.TF:
   nodesfile = os.environ['MACHINE_FILE_NAME']
   rank = int(os.environ['GASPI_RANK'])
-  num_ranks = tf_dist.tf_get_num_ranks(nodesfile)
-
-  strategy = tf_dist.tf_init_multiworker_strategy(nodesfile, rank)
-
+  nnp = int(os.environ['NNP'])
+  num_ranks = tf_dist.tf_get_num_ranks(nodesfile, nnp)
+  strategy = tf_dist.tf_init_multiworker_strategy(nodesfile, rank, nnp)
 
 
 
@@ -209,47 +213,37 @@ if __name__ == '__main__':
   if args.distribute == ParallelMethods.TF:
     with strategy.scope():
       model = model_arch(include_top=True,
-                        weights=None,
-                        classes=1000,
-                        input_shape=(224, 224, 3),
-                        input_tensor=None,
-                        pooling=None,
-                        classifier_activation='softmax')
-
-      train_dataset, val_dataset = load_data(args)
+                         weights=None,
+                         classes=1000,
+                         input_shape=(224, 224, 3),
+                         input_tensor=None,
+                         pooling=None,
+                         classifier_activation='softmax')
       model.compile(**get_reference_compile_params(num_ranks=num_ranks,
-                                                  num_samples = args.train_num_samples,
-                                                  batch_size=args.batch_size))
-
-      history = model.fit(train_dataset,
-                          validation_data = val_dataset,
-                          validation_freq=args.val_freq,
-                          epochs=args.train_epochs,
-                          callbacks=callbacks,
-                          verbose=args.verbose)
+                                                   num_samples = args.train_num_samples,
+                                                   batch_size=args.batch_size))
   else:
     model = model_arch(include_top=True,
-                      weights=None,
-                      classes=1000,
-                      input_shape=(224, 224, 3),
-                      input_tensor=None,
-                      pooling=None,
-                      classifier_activation='softmax')
+                       weights=None,
+                       classes=1000,
+                       input_shape=(224, 224, 3),
+                       input_tensor=None,
+                       pooling=None,
+                       classifier_activation='softmax')
 
     if args.distribute == ParallelMethods.TNT:
       model = tnt.Model(model,
                         parallel_strategy = strategy,
                         num_pipeline_stages = args.num_pipeline_stages)
-
-    train_dataset, val_dataset = load_data(args)
     model.compile(**get_reference_compile_params(num_ranks=num_ranks,
-                                                num_samples = args.train_num_samples,
-                                                batch_size=args.batch_size))
+                                                 num_samples = args.train_num_samples,
+                                                 batch_size=args.batch_size))
 
-    history = model.fit(train_dataset,
-                        validation_data = val_dataset,
-                        validation_freq=args.val_freq,
-                        epochs=args.train_epochs,
-                        callbacks=callbacks,
-                        verbose=args.verbose)
+  train_dataset, val_dataset = load_data(args)
+  history = model.fit(train_dataset,
+                      validation_data = val_dataset,
+                      validation_freq=args.val_freq,
+                      epochs=args.train_epochs,
+                      callbacks=callbacks,
+                      verbose=args.verbose)
 
