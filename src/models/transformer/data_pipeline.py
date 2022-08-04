@@ -69,11 +69,15 @@ _BOUNDARY_SCALE = 1.1
 _NUM_TRAIN_SENTENCES = 4508785
 _NUM_EVAL_SENTENCES = 3000
 
-_SHUFFLE_BUFFER_SIZE = 8192
+SHUFFLE_BUFFER = 6400 # nranks_per_node * 64 * imagesize * number batches < available memory
+PREPROCESS_CYCLE_LENGTH = 8
+PREPROCESS_NUM_THREADS = tf.data.experimental.AUTOTUNE
+PREFETCH_NBATCHES = tf.data.AUTOTUNE
 
 def _load_records(filename):
   """Read file and return a dataset of tf.Examples."""
   return tf.data.TFRecordDataset(filename, buffer_size=_READ_RECORD_BUFFER)
+
 
 def _read_and_batch_from_files(file_pattern,
                                batch_size,
@@ -84,73 +88,50 @@ def _read_and_batch_from_files(file_pattern,
                                shuffle_seed,
                                num_ranks,
                                rank):
-  """Create dataset where each item is a dict of "inputs" and "targets".
+  dataset = tf.data.Dataset.list_files(file_pattern, shuffle=False)
+  dataset = dataset.cache()
 
-  Args:
-    file_pattern: String used to match the input TFRecord files.
-    batch_size: Number of tokens per global batch of examples.
-                The input is batched so that every batch has the shape
-                [batch_size // max_length, max_length].
-    max_length: Maximum number of tokens per example
-    max_io_parallelism: Max number of cpu cores for parallel input processing.
-    shuffle: If true, randomizes order of elements.
-    shuffle_seed: Fixed seed to be used for shuffling.
-    num_ranks: Total number of ranks involved in parallel training.
-    rank: Rank of the current process.
-  Returns:
-    tf.data.Dataset object containing examples loaded from the files.
-  """
-  dataset = tf.data.Dataset.list_files(file_pattern, shuffle=shuffle, seed=shuffle_seed)
+  # Convert to individual records.
+  dataset = dataset.interleave(tf.data.TFRecordDataset,
+                               cycle_length=PREPROCESS_CYCLE_LENGTH,
+                               num_parallel_calls=PREPROCESS_NUM_THREADS,
+                               deterministic = False)
 
-  # Read files and interleave results. When training, the order of the examples
-  # will be deterministic, but can be randomized by specifying a shuffling seed
-  options = tf.data.Options()
-  options.experimental_deterministic = True
-  dataset = dataset.interleave(data_pipeline._load_records,
-                               cycle_length=max_io_parallelism,
-                               num_parallel_calls=tf.data.experimental.AUTOTUNE)
-  dataset = dataset.with_options(options)
+  number_batch_sentences =  batch_size // max_length
+  num_ranks = 1 if num_ranks is None else num_ranks
 
-  # Parse each tf.Example into a dictionary
-  dataset = dataset.map(
-      data_pipeline._parse_example, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+  if number_batch_sentences % num_ranks > 0:
+    raise ValueError(f"The required number of sentences per batch ({batch_size}/{max_length}) is not a "
+                     f"multiple of the number of ranks {num_ranks}")
+  if num_sentences < number_batch_sentences:
+    raise ValueError(f"The required number of sentences {num_sentences} has to be larger than the number "
+                     f"of sentences per batch {number_batch_sentences}")
+  dataset = dataset.take(num_sentences)
+
+  dataset = dataset.map(data_pipeline._parse_example,
+                        num_parallel_calls=tf.data.experimental.AUTOTUNE,
+                        deterministic = False)
 
   # Remove examples where the input or target length exceeds the maximum length,
   dataset = dataset.filter(lambda x, y: data_pipeline._filter_max_length((x, y), max_length))
 
-  # Shuffle examples
-  dataset = dataset.shuffle(_SHUFFLE_BUFFER_SIZE, seed = shuffle_seed)
+  dataset = dataset.shuffle(buffer_size=min(batch_size, 64*64),
+                            seed=shuffle_seed)
+  if num_ranks <= 1:
+    dataset = dataset.padded_batch(number_batch_sentences,
+                                  ([max_length], [max_length]),
+                                  drop_remainder=True)
+  else:
+    micro_batch_size = number_batch_sentences // num_ranks
+    dataset = dataset.padded_batch(micro_batch_size,
+                                  ([max_length], [max_length]),
+                                  drop_remainder=True)
+    dataset = dataset.shard(num_ranks, rank)
 
-  # Group records into fixed-length sentences and then batch sentences together
-  number_batch_sentences =  batch_size // max_length
-  if number_batch_sentences % num_ranks > 0:
-    raise ValueError(
-      "The required number of sentences per batch ({}/{}) is not a multiple of the number of ranks {}".format(
-      batch_size, max_length, num_ranks))
-
-
-  # make sure the number of sentences used for training is at least as large as the number of sentences
-  # (of length `max_length`) in a batch
-  if num_sentences < number_batch_sentences:
-    raise ValueError(
-      "The required number of sentences {} has to be larger than the number of sentences per batch {}".format(
-      num_sentences, number_batch_sentences))
-  dataset = dataset.repeat()
-  dataset = dataset.take(num_sentences // number_batch_sentences * number_batch_sentences)
-
-  # Compute the micro_batch_size per rank
-  micro_batch_size = number_batch_sentences // num_ranks
-
-  # Batch the sentences and select only the shard (subset) corresponding to the current rank
-  dataset = dataset.padded_batch(micro_batch_size,
-                                 ([max_length], [max_length]),
-                                 drop_remainder=True)
-  dataset = dataset.shard(num_ranks, rank)
-
-  # Prefetch the next element to improve speed of input pipeline.
-  dataset = dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
+  dataset = dataset.prefetch(buffer_size=PREFETCH_NBATCHES)
   dataset = dataset.map(data_pipeline.map_data_for_transformer_fn,
                         num_parallel_calls=tf.data.experimental.AUTOTUNE)
+
   return dataset
 
 
