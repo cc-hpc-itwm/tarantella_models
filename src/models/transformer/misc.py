@@ -66,6 +66,10 @@ def define_transformer_flags():
       name='print_freq', default=50,
       help='How often will the `utils.RuntimeProfiler` callback print logging information.')
 
+  flags.DEFINE_boolean(
+      name='auto_data_dist', default=True,
+      help='Whether to use the automatical data distribution in Tarantella.')
+
   # Set flags from the flags_core module as 'key flags' so they're listed when
   # the '-h' flag is used. Without this line, the flags defined above are
   # only shown in the full `--helpful` help text.

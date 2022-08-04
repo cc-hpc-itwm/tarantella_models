@@ -128,10 +128,12 @@ class TransformerTntTask(object):
     self.train_model.summary()
 
     # create train dataset
+    num_ranks = None if self.flags_obj.auto_data_dist else tnt.get_size()
+    rank = None if self.flags_obj.auto_data_dist else tnt.get_rank()
     train_ds = data_pipeline.train_input_fn(self.params,
                                             shuffle_seed = 42,
-                                            num_ranks = None,
-                                            rank = None)
+                                            num_ranks = num_ranks,
+                                            rank = rank)
 
     # enable global callbacks
     callbacks = []
@@ -157,7 +159,7 @@ class TransformerTntTask(object):
       # as our dataset is distributed manually, disable the automatic Tarantella distribution
       history = self.train_model.fit(train_ds,
                                      callbacks = callbacks,
-                                     tnt_distribute_dataset = True,
+                                     tnt_distribute_dataset = self.flags_obj.auto_data_dist,
                                      initial_epoch = epoch,
                                      epochs = epoch + min(self.params["epochs_between_evals"],
                                                           self.params["train_epochs"]-epoch),

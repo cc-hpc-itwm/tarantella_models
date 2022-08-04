@@ -123,10 +123,11 @@ def _read_and_batch_from_files(file_pattern,
                                   drop_remainder=True)
   else:
     micro_batch_size = number_batch_sentences // num_ranks
+    dataset = dataset.shard(num_ranks, rank)
     dataset = dataset.padded_batch(micro_batch_size,
                                   ([max_length], [max_length]),
                                   drop_remainder=True)
-    dataset = dataset.shard(num_ranks, rank)
+
 
   dataset = dataset.prefetch(buffer_size=PREFETCH_NBATCHES)
   dataset = dataset.map(data_pipeline.map_data_for_transformer_fn,
