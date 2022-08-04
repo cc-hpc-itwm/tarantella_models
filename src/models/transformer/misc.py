@@ -54,6 +54,18 @@ def define_transformer_flags():
       name='enable_metrics_in_training', default=False,
       help='Whether to enable metrics during training.')
 
+  flags.DEFINE_boolean(
+      name='enable_profiler', default=False,
+      help='Whether to enable `utils.RuntimeProfiler` callback.')
+
+  flags.DEFINE_integer(
+      name='logging_freq', default=10,
+      help='How often will the `utils.RuntimeProfiler` callback collect runtime logs.')
+
+  flags.DEFINE_integer(
+      name='print_freq', default=50,
+      help='How often will the `utils.RuntimeProfiler` callback print logging information.')
+
   # Set flags from the flags_core module as 'key flags' so they're listed when
   # the '-h' flag is used. Without this line, the flags defined above are
   # only shown in the full `--helpful` help text.
@@ -154,5 +166,4 @@ def define_transformer_flags():
   flags.DEFINE_integer(
       name='num_eval_sentences', default=3000,
       help=flags_core.help_wrap('The number of sentences used in evaluation.'))
-
 
