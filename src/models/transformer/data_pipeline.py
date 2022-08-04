@@ -129,10 +129,43 @@ def _read_and_batch_from_files(file_pattern,
                                   drop_remainder=True)
 
 
-  dataset = dataset.prefetch(buffer_size=PREFETCH_NBATCHES)
   dataset = dataset.map(data_pipeline.map_data_for_transformer_fn,
                         num_parallel_calls=tf.data.experimental.AUTOTUNE)
+  dataset = dataset.prefetch(buffer_size=PREFETCH_NBATCHES)
+  return dataset
 
+
+
+def generate_synthetic_data(batch_size,
+                            max_length,
+                            num_sentences,
+                            num_ranks,
+                            rank):
+  """Create synthetic data based on the parameter batch size."""
+  number_batch_sentences =  batch_size // max_length
+  num_ranks = 1 if num_ranks is None else num_ranks
+  
+  dataset = model_helpers.generate_synthetic_data(
+      input_shape=tf.TensorShape([max_length]),
+      input_value=1,
+      input_dtype=tf.int64,
+      label_shape=tf.TensorShape([max_length]),
+      label_value=1,
+      label_dtype=tf.int64)
+  dataset = dataset.take(num_sentences)
+  if num_ranks <= 1:
+    dataset = dataset.padded_batch(number_batch_sentences,
+                                  ([max_length], [max_length]),
+                                  drop_remainder=True)
+  else:
+    micro_batch_size = number_batch_sentences // num_ranks
+    dataset = dataset.shard(num_ranks, rank)
+    dataset = dataset.padded_batch(micro_batch_size,
+                                  ([max_length], [max_length]),
+                                  drop_remainder=True)
+  dataset = dataset.map(data_pipeline.map_data_for_transformer_fn,
+                        num_parallel_calls=tf.data.experimental.AUTOTUNE)
+  dataset = dataset.prefetch(buffer_size=PREFETCH_NBATCHES)
   return dataset
 
 
@@ -144,6 +177,13 @@ def train_input_fn(params, num_ranks, rank, shuffle_seed):
     num_sentences = params["num_sentences"]
   else:
     num_sentences = _NUM_TRAIN_SENTENCES
+
+  if params["synthetic_data"]:
+    return generate_synthetic_data(params["batch_size"],
+                                   params["max_length"],
+                                   num_sentences = num_sentences,
+                                   num_ranks = num_ranks,
+                                   rank = rank)
 
   return _read_and_batch_from_files(
       file_pattern,

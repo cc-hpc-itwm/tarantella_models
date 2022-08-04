@@ -70,6 +70,10 @@ def define_transformer_flags():
       name='auto_data_dist', default=True,
       help='Whether to use the automatical data distribution in Tarantella.')
 
+  flags.DEFINE_boolean(
+      name='synthetic_data', default=False,
+      help='Whether to use the automatical data distribution in Tarantella.')
+
   # Set flags from the flags_core module as 'key flags' so they're listed when
   # the '-h' flag is used. Without this line, the flags defined above are
   # only shown in the full `--helpful` help text.

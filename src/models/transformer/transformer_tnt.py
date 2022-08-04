@@ -92,6 +92,8 @@ class TransformerTntTask(object):
     self.params["num_eval_sentences"] = flags_obj.num_eval_sentences
     self.params["batch_size"] = flags_obj.batch_size or self.params["default_batch_size"]
 
+    self.params["synthetic_data"] = flags_obj.synthetic_data
+
     self.params["data_dir"] = flags_obj.data_dir
     self.params["vocab_size"] = flags_obj.vocab_size or self.params["vocab_size"]
     self.params["max_length"] = flags_obj.max_length
