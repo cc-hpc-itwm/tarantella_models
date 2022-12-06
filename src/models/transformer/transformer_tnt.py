@@ -43,6 +43,7 @@ from official.utils.misc import keras_utils
 
 import data_pipeline
 import misc as tnt_misc
+import models.utils as utils
 
 import tarantella as tnt
   
@@ -91,6 +92,8 @@ class TransformerTntTask(object):
     self.params["num_eval_sentences"] = flags_obj.num_eval_sentences
     self.params["batch_size"] = flags_obj.batch_size or self.params["default_batch_size"]
 
+    self.params["synthetic_data"] = flags_obj.synthetic_data
+
     self.params["data_dir"] = flags_obj.data_dir
     self.params["vocab_size"] = flags_obj.vocab_size or self.params["vocab_size"]
     self.params["max_length"] = flags_obj.max_length
@@ -127,10 +130,12 @@ class TransformerTntTask(object):
     self.train_model.summary()
 
     # create train dataset
+    num_ranks = None if self.flags_obj.auto_data_dist else tnt.get_size()
+    rank = None if self.flags_obj.auto_data_dist else tnt.get_rank()
     train_ds = data_pipeline.train_input_fn(self.params,
                                             shuffle_seed = 42,
-                                            num_ranks = tnt.get_size(),
-                                            rank = tnt.get_rank())
+                                            num_ranks = num_ranks,
+                                            rank = rank)
 
     # enable global callbacks
     callbacks = []
@@ -138,14 +143,14 @@ class TransformerTntTask(object):
       callbacks.append(tf.keras.callbacks.TensorBoard(log_dir=self.flags_obj.model_dir))
 
     # enable logging callbacks only on the master rank
-    if self.flags_obj.enable_time_history:
-      time_callback = keras_utils.TimeHistory(self.params["batch_size"],
-                                              self.params["num_sentences"],
-                                              logdir = None)
-      tnt_time_callback = tnt.keras.callbacks.Callback(time_callback,
-                                                       aggregate_logs = False,
-                                                       run_on_all_ranks = False)
-      callbacks.append(tnt_time_callback)
+    if self.flags_obj.enable_profiler:
+      profiler_callback = utils.RuntimeProfiler(batch_size = self.params["batch_size"],
+                                                logging_freq = self.flags_obj.logging_freq,
+                                                print_freq = self.flags_obj.print_freq)
+      profiler_callback = tnt.keras.callbacks.Callback(profiler_callback,
+                                                       run_on_all_ranks = False,
+                                                       aggregate_logs = False)
+      callbacks.append(profiler_callback)
 
     # print messages only once
     if tnt.is_master_rank():
@@ -156,7 +161,7 @@ class TransformerTntTask(object):
       # as our dataset is distributed manually, disable the automatic Tarantella distribution
       history = self.train_model.fit(train_ds,
                                      callbacks = callbacks,
-                                     tnt_distribute_dataset = False,
+                                     tnt_distribute_dataset = self.flags_obj.auto_data_dist,
                                      initial_epoch = epoch,
                                      epochs = epoch + min(self.params["epochs_between_evals"],
                                                           self.params["train_epochs"]-epoch),
@@ -165,9 +170,9 @@ class TransformerTntTask(object):
       if tnt.is_master_rank():
         logging.info("Train history: {}".format(history.history))
 
-      if tnt.is_master_rank():
-        eval_stats = self.eval()
-        stats.update(eval_stats)
+      # if tnt.is_master_rank():
+      #   eval_stats = self.eval()
+      #   stats.update(eval_stats)
 
     return stats
 
