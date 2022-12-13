@@ -1,3 +1,5 @@
+
+
 # Copyright 2018 The TensorFlow Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -70,7 +72,7 @@ _NUM_TRAIN_SENTENCES = 4508785
 _NUM_EVAL_SENTENCES = 3000
 
 SHUFFLE_BUFFER = 6400 # nranks_per_node * 64 * imagesize * number batches < available memory
-PREPROCESS_CYCLE_LENGTH = 8
+PREPROCESS_CYCLE_LENGTH = tf.data.experimental.AUTOTUNE
 PREPROCESS_NUM_THREADS = tf.data.experimental.AUTOTUNE
 PREFETCH_NBATCHES = tf.data.AUTOTUNE
 
@@ -109,7 +111,7 @@ def _read_and_batch_from_files(file_pattern,
   dataset = dataset.take(num_sentences)
 
   dataset = dataset.map(data_pipeline._parse_example,
-                        num_parallel_calls=tf.data.experimental.AUTOTUNE,
+                        num_parallel_calls=PREPROCESS_NUM_THREADS,
                         deterministic = False)
 
   # Remove examples where the input or target length exceeds the maximum length,
@@ -130,7 +132,7 @@ def _read_and_batch_from_files(file_pattern,
 
 
   dataset = dataset.map(data_pipeline.map_data_for_transformer_fn,
-                        num_parallel_calls=tf.data.experimental.AUTOTUNE)
+                        num_parallel_calls=PREPROCESS_NUM_THREADS)
   dataset = dataset.prefetch(buffer_size=PREFETCH_NBATCHES)
   return dataset
 
@@ -164,7 +166,7 @@ def generate_synthetic_data(batch_size,
                                   ([max_length], [max_length]),
                                   drop_remainder=True)
   dataset = dataset.map(data_pipeline.map_data_for_transformer_fn,
-                        num_parallel_calls=tf.data.experimental.AUTOTUNE)
+                        num_parallel_calls=PREPROCESS_NUM_THREADS)
   dataset = dataset.prefetch(buffer_size=PREFETCH_NBATCHES)
   return dataset
 
